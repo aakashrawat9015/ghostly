@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+:root {
+  --text: #6b6375;
+  --accent: #aa3bff;
+  --accent-bg: rgba(170, 59, 255, 0.1);
+  font-family: system-ui, sans-serif;
+}
+
+/* ✅ CRITICAL: allow transparency */
+html,
+body,
+#root {
+  margin: 0;
+  background: transparent !important;
+  color: var(--text);
+}
+
+/* Optional: only control window uses white bg */
+.control-page {
+  background: #e0aaaa;
+}

@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+out/
+dist/
+
+# Recordings
+recordings/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Vite cache
+.vite/
+
+# Electron builder cache
+.electron-builder/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment variables
+.env
+.env.*
+src/renderer/.env
+src/renderer/.env.*
+!.env.example
+!src/renderer/.env.example
+
+# Native binaries / bundled executables
+resources/audio/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Claude Code local settings
+.claude/

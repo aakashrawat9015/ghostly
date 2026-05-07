@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "lib": [
+      "ESNext"
+    ],
+    "rootDir": "src",
+    "outDir": "dist",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "strict": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "typeRoots": [
+      "./src/types",
+      "./node_modules/@types"
+    ]
+  },
+  "include": [
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/workers/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/renderer"
+  ]
+}

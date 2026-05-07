@@ -1,0 +1,40 @@
+{
+  "name": "electron-client",
+  "version": "1.0.0",
+  "description": "ghostly_electron_client",
+  "main": "dist/main/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "clean": "cmd /c \"if exist dist rmdir /s /q dist\"",
+    "start": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
+    "dev:renderer": "vite",
+    "dev:main": "wait-on http://localhost:5173 && tsc -p tsconfig.main.json && concurrently \"tsc -p tsconfig.main.json -w\" \"electron .\"",
+    "build": "npm run clean && vite build && tsc -p tsconfig.main.json"
+  },
+  "dependencies": {
+    "@shiguredo/rnnoise-wasm": "^2025.1.5",
+    "@tailwindcss/vite": "^4.2.4",
+    "dotenv": "^17.4.2",
+    "electron": "^41.3.0",
+    "groq-sdk": "^1.1.2",
+    "mic": "^2.1.2",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "tailwindcss": "^4.2.4",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "^1.0.0-rc.18",
+    "@types/node": "^24.12.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.5.14",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.10",
+    "wait-on": "^8.0.5"
+  }
+}
