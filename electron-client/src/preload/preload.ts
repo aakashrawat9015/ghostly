@@ -64,6 +64,19 @@ contextBridge.exposeInMainWorld("api", {
         return () => ipcRenderer.removeListener("transcript:clear", handler)
     },
 
+    // ✅ Streaming: called with accumulated text as tokens arrive
+    onAIAnswerChunk: (cb: (accumulated: string) => void) => {
+        const handler = (_: unknown, accumulated: string) => cb(accumulated)
+        ipcRenderer.on("ai:answer:chunk", handler)
+        return () => ipcRenderer.removeListener("ai:answer:chunk", handler)
+    },
+
+    onAISummary: (cb: (text: string) => void) => {
+        const handler = (_: unknown, text: string) => cb(text)
+        ipcRenderer.on("ai:summary", handler)
+        return () => ipcRenderer.removeListener("ai:summary", handler)
+    },
+
     setOverlayInteractive: (interactive: boolean): Promise<Reply> =>
         ipcRenderer.invoke("overlay:setInteractive", interactive),
 

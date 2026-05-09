@@ -33,6 +33,9 @@ declare global {
             onTranscriptFinal: (cb: (text: string) => void) => () => void
             onTranscriptClear: (cb: () => void) => () => void
 
+            onAIAnswerChunk: (cb: (accumulated: string) => void) => () => void
+            onAISummary: (cb: (text: string) => void) => () => void
+
             setOverlayInteractive: (interactive: boolean) => Promise<Reply>
             setSTTMode: (mode: STTMode) => Promise<Reply>
         }

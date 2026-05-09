@@ -6,7 +6,7 @@ const DEBUG = process.env.DEBUG === "true"
 const DEBUG_AUDIO = process.env.DEBUG_AUDIO === "true"
 
 // Batch audio before sending to worker (reduces message spam)
-const FLUSH_INTERVAL_MS = 50 // 20 msgs/sec max
+const FLUSH_INTERVAL_MS = 20  // was 50ms — 50x/sec instead of 20x/sec
 const MAX_BUFFERED_BYTES = 2 * 1024 * 1024 // 2MB safety cap
 
 const RESTART_DELAY_MS = 1000
@@ -19,7 +19,9 @@ export type WorkerRequest =
 
 export type WorkerResponse =
     | { type: "result"; payload: AIResult }
+    | { type: "result-chunk"; payload: { chunk: string; accumulated: string } }
     | { type: "intent"; payload: AIIntent }
+    | { type: "summary"; payload: string }
     | { type: "error"; payload: string }
     | { type: "log"; payload: string }
     | { type: "transcript-partial"; payload: string }
@@ -27,7 +29,9 @@ export type WorkerResponse =
     | { type: "transcript-clear" }
 
 type ResultCallback = (data: AIResult) => void
+type ResultChunkCallback = (data: { chunk: string; accumulated: string }) => void
 type IntentCallback = (data: AIIntent) => void
+type SummaryCallback = (text: string) => void
 type ErrorCallback = (err: string) => void
 type LogCallback = (msg: string) => void
 type TranscriptPartialCallback = (text: string) => void
@@ -39,7 +43,9 @@ export class WorkerBridge {
     private isTerminated = false
 
     private onResultCb?: ResultCallback
+    private onResultChunkCb?: ResultChunkCallback
     private onIntentCb?: IntentCallback
+    private onSummaryCb?: SummaryCallback
     private onErrorCb?: ErrorCallback
     private onLogCb?: LogCallback
     private onTranscriptPartialCb?: TranscriptPartialCallback
@@ -73,7 +79,9 @@ export class WorkerBridge {
 
         this.worker.on("message", (msg: WorkerResponse) => {
             if (msg.type === "result") this.onResultCb?.(msg.payload)
+            if (msg.type === "result-chunk") this.onResultChunkCb?.(msg.payload)
             if (msg.type === "intent") this.onIntentCb?.(msg.payload)
+            if (msg.type === "summary") this.onSummaryCb?.(msg.payload)
             if (msg.type === "error") this.onErrorCb?.(msg.payload)
             if (msg.type === "log") this.onLogCb?.(msg.payload)
             if (msg.type === "transcript-partial") this.onTranscriptPartialCb?.(msg.payload)
@@ -165,12 +173,10 @@ export class WorkerBridge {
         this.worker?.postMessage({ type: "stop" })
     }
 
-    onResult(cb: ResultCallback) {
-        this.onResultCb = cb
-    }
-    onIntent(cb: IntentCallback) {
-        this.onIntentCb = cb
-    }
+    onResult(cb: ResultCallback) { this.onResultCb = cb }
+    onResultChunk(cb: ResultChunkCallback) { this.onResultChunkCb = cb }
+    onIntent(cb: IntentCallback) { this.onIntentCb = cb }
+    onSummary(cb: SummaryCallback) { this.onSummaryCb = cb }
     onError(cb: ErrorCallback) {
         this.onErrorCb = cb
     }

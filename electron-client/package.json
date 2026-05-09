@@ -8,7 +8,7 @@
     "clean": "cmd /c \"if exist dist rmdir /s /q dist\"",
     "start": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
     "dev:renderer": "vite",
-    "dev:main": "wait-on http://localhost:5173 && tsc -p tsconfig.main.json && concurrently \"tsc -p tsconfig.main.json -w\" \"electron .\"",
+    "dev:main": "wait-on http://localhost:5173 && concurrently \"tsc -p tsconfig.main.dev.json -w --preserveWatchOutput\" \"wait-on dist/main/main.js && electron .\"",
     "build": "npm run clean && vite build && tsc -p tsconfig.main.json"
   },
   "dependencies": {

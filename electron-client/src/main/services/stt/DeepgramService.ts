@@ -8,15 +8,18 @@ export type STTMode = "technical" | "general" | "meeting"
 const KEEPALIVE_INTERVAL = 5000
 const RECONNECT_DELAY = 2000
 const MAX_QUEUE_SIZE = 100
-const MIN_CONFIDENCE_PARTIAL = 0.7 // 70% se kam confidence wale partial ignore
-const MIN_AUDIO_CHUNK_SIZE = 3200 // 100ms @ 16kHz - chhote chunks skip
+const MIN_CONFIDENCE_PARTIAL = 0.7
+const MIN_AUDIO_CHUNK_SIZE = 1600  // 50ms @ 16kHz — was 3200 (100ms)
 
 // ✅ MASTER KEYWORD LIST - 20 words max, high impact wale
 const TECHNICAL_KEYWORDS = [
     "ChatGPT:10", "Claude:10", "Groq:10", "MCP:10", "Model Context Protocol:10",
     "JavaScript:10", "TypeScript:10", "React:10", "Electron:10", "Node.js:8",
     "async:10", "await:10", "Promise:10", "callback:8", "API:8",
-    "single-threaded:10", "multithreaded:10", "event loop:10", "WebSocket:8", "JSON:8"
+    "single-threaded:10", "multithreaded:10", "event loop:10", "WebSocket:8", "JSON:8",
+    // ✅ AI/ML terms that Deepgram commonly mishears
+    "RAG:10", "Retrieval-Augmented Generation:10", "LLM:10", "embeddings:10",
+    "vector database:10", "fine-tuning:10", "inference:8", "transformer:8",
 ]
 
 const MEETING_KEYWORDS = [
@@ -66,17 +69,17 @@ export class DeepgramService {
             channels: "1",
             interim_results: "true",
             punctuate: "true",
-            smart_format: "true",
+            smart_format: "false",  // was true — adds server-side post-processing latency
             vad_events: "true",
-            endpointing: "300", // 300ms silence = final
-            utterance_end_ms: "1000", // ✅ 1s pause = new utterance
-            profanity_filter: "false", // ✅ "async" block na ho
-            diarize: "false", // Single speaker
+            endpointing: "300",
+            utterance_end_ms: "1000",
+            profanity_filter: "false",
+            diarize: "false",
         })
 
         // ✅ Mode-specific config
         if (mode === "technical") {
-            params.set("prompt", "Technical software engineering discussion about JavaScript, TypeScript, React, MCP, Claude, Electron, async await, promises, event loop, API, WebSocket, Node.js.")
+            params.set("prompt", "Technical software engineering and AI/ML discussion. RAG means Retrieval-Augmented Generation. LLM means Large Language Model. MCP means Model Context Protocol. Topics include JavaScript, TypeScript, React, Electron, Node.js, async await, promises, event loop, API, WebSocket, vector databases, embeddings, fine-tuning.")
 
             // Base keywords + dynamic keywords
             const allKeywords = [...TECHNICAL_KEYWORDS, ...this.dynamicKeywords]

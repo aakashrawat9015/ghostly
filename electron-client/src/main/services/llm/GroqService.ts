@@ -45,10 +45,116 @@ export class GroqService {
         this.maxTranscriptChars = opts?.maxTranscriptChars ?? DEFAULT_MAX_TRANSCRIPT_CHARS
     }
 
+    /**
+     * Streaming version — calls onChunk with each token as it arrives.
+     * Returns the full accumulated text when done.
+     */
+    async generateAnswerStream(input: {
+        transcript: string
+        systemPrompt: string
+        userPrompt: string
+        temperature?: number
+        maxTokens?: number
+        additionalMessages?: GroqChatMessage[]
+        signal?: AbortSignal
+        onChunk: (chunk: string, accumulated: string) => void
+    }): Promise<string> {
+        const {
+            systemPrompt,
+            userPrompt,
+            temperature = 0.15,
+            maxTokens = 150,        // was 350 — shorter = faster completion
+            additionalMessages = [],
+            signal,
+            onChunk,
+        } = input
+
+        if (!systemPrompt || !userPrompt) {
+            throw new Error("Both systemPrompt and userPrompt are required")
+        }
+
+        const messages: GroqChatMessage[] = [
+            { role: "system", content: systemPrompt },
+            ...additionalMessages,
+            { role: "user", content: userPrompt },
+        ]
+
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), this.timeoutMs)
+        const onAbort = () => controller.abort()
+        signal?.addEventListener("abort", onAbort, { once: true })
+
+        try {
+            const res = await fetch(`${this.baseUrl}/chat/completions`, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${this.apiKey}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    model: this.model,
+                    messages,
+                    temperature,
+                    max_tokens: maxTokens,
+                    stream: true,
+                }),
+                signal: controller.signal,
+            })
+
+            if (!res.ok) {
+                const raw = await res.text().catch(() => "")
+                throw new Error(`Groq HTTP ${res.status}: ${raw || res.statusText}`)
+            }
+
+            if (!res.body) throw new Error("Groq: no response body for streaming")
+
+            const reader = res.body.getReader()
+            const decoder = new TextDecoder()
+            let accumulated = ""
+            let buffer = ""
+
+            while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+
+                buffer += decoder.decode(value, { stream: true })
+                const lines = buffer.split("\n")
+                buffer = lines.pop() ?? "" // keep incomplete line
+
+                for (const line of lines) {
+                    const trimmed = line.trim()
+                    if (!trimmed || trimmed === "data: [DONE]") continue
+                    if (!trimmed.startsWith("data: ")) continue
+
+                    try {
+                        const json = JSON.parse(trimmed.slice(6))
+                        const delta = json.choices?.[0]?.delta?.content
+                        if (delta) {
+                            accumulated += delta
+                            onChunk(delta, accumulated)
+                        }
+                    } catch {
+                        // malformed SSE line — skip
+                    }
+                }
+            }
+
+            return accumulated.trim() || "No answer generated."
+        } catch (e: any) {
+            if (e?.name === "AbortError") {
+                throw new Error(`Groq request timed out/aborted after ${this.timeoutMs}ms`)
+            }
+            throw e
+        } finally {
+            clearTimeout(timer)
+            signal?.removeEventListener("abort", onAbort)
+        }
+    }
+
     async generateAnswer(input: {
         transcript: string
-        systemPrompt: string  // ✅ REQUIRED (no default)
-        userPrompt: string    // ✅ REQUIRED
+        systemPrompt: string
+        userPrompt: string
         temperature?: number
         maxTokens?: number
         additionalMessages?: GroqChatMessage[]
@@ -58,18 +164,15 @@ export class GroqService {
             transcript,
             systemPrompt,
             userPrompt,
-            temperature = 0.2,
-            maxTokens = 350,
+            temperature = 0.15,
+            maxTokens = 150,        // was 350
             additionalMessages = [],
             signal,
         } = input
 
-        // ✅ Validate required prompts
         if (!systemPrompt || !userPrompt) {
             throw new Error("Both systemPrompt and userPrompt are required")
         }
-
-        const trimmedTranscript = truncateTail(transcript, this.maxTranscriptChars)
 
         const messages: GroqChatMessage[] = [
             { role: "system", content: systemPrompt },
@@ -126,8 +229,6 @@ export class GroqService {
         }
     }
 }
-
-// ✅ Removed defaultSystemPrompt() - not needed
 
 function truncateTail(text: string, maxChars: number) {
     const t = (text ?? "").trim()

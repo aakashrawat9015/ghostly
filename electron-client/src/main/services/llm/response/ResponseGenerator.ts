@@ -3,7 +3,8 @@ import type { ResponseContext, GeneratedResponse } from "./types"
 import { ResponseDeduplicator } from "./dedup"
 import { checkResponseQuality } from "./quality"
 import { cleanText } from "../filters"
-import { PROMPTS, buildUserPrompt } from "../prompts"  // ✅ Import the good one!
+import { PROMPTS, buildUserPrompt } from "../prompts"
+import { parentPort } from "worker_threads"
 
 const DEBUG = process.env.DEBUG_LLM === "true"
 
@@ -19,27 +20,34 @@ export class ResponseGenerator {
         const intentKey = (intent === "none" ? "question" : intent) as Exclude<typeof intent, "none">
         const systemPrompt = PROMPTS[intentKey]
 
-        // ✅ FIX: Use the imported function, not local one
         const userPrompt = inputType === "followup" && previousQA
             ? this.buildFollowUpPrompt(input, conversationHistory, previousQA)
-            : buildUserPrompt(conversationHistory, input, intentKey)  // ✅ From prompts.ts
+            : buildUserPrompt(conversationHistory, input, intentKey)
 
         if (DEBUG) {
-            console.log(`\n[ResponseGenerator] 🤖 Generating response...`)
+            console.log(`\n[ResponseGenerator] 🤖 Generating response (streaming)...`)
             console.log(`  Intent: ${intent}`)
             console.log(`  Type: ${inputType}`)
             console.log(`  Input: "${input}"`)
-            console.log(`\n[ResponseGenerator] 📨 User Prompt:`)
-            console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
-            console.log(userPrompt)
-            console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`)
         }
 
-        // Call LLM
-        const raw = await this.groq.generateAnswer({
+        // ✅ Stream tokens to overlay as they arrive
+        const raw = await this.groq.generateAnswerStream({
             transcript: conversationHistory,
             systemPrompt,
             userPrompt,
+            maxTokens: 150,      // was 350 — shorter answers, much faster first token
+            temperature: 0.15,   // slightly lower = less sampling overhead
+            onChunk: (_chunk, accumulated) => {
+                try {
+                    parentPort?.postMessage({
+                        type: "result-chunk",
+                        payload: { chunk: _chunk, accumulated }
+                    })
+                } catch {
+                    // worker may be shutting down
+                }
+            }
         })
 
         const cleaned = cleanText(raw)
@@ -62,7 +70,6 @@ export class ResponseGenerator {
             return null
         }
 
-        // Record and return
         this.deduplicator.recordAnswer(cleaned, now)
 
         const confidence = qualityCheck.isContextWarning ? 0.5 : 0.85
@@ -83,29 +90,8 @@ export class ResponseGenerator {
         conversationHistory: string,
         previousQA: { question: string; answer: string }
     ): string {
-        return `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FOLLOW-UP QUESTION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Previous Question:
-"${previousQA.question}"
-
-Previous Answer:
-"${previousQA.answer}"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CURRENT FOLLOW-UP:
-"${input}"
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Provide MORE DETAILS, examples, or deeper explanation.
-- Build on the previous answer
-- Add technical specifics
-- DO NOT repeat what was already said
-- Max 3-4 lines
-
-Context:
-${conversationHistory}`
+        const ctx = conversationHistory.slice(-300)
+        return `Prev Q: "${previousQA.question}"\nPrev A: "${previousQA.answer}"\nFollow-up: "${input}"\n${ctx ? `Context: ${ctx}` : ""}\nAdd detail, don't repeat. Max 3 bullets.`
     }
 
     reset() {

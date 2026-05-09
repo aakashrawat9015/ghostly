@@ -46,8 +46,9 @@ export function detectIntent(text: string): IntentType {
     if (TRIGGER_PATTERNS.modalQuestion.test(t)) return "decision"
     if (TRIGGER_PATTERNS.decision.test(t) && words.length >= 6) return "decision"
 
-    // Passive context: substantive sentence worth summarising / suggesting on
-    if (words.length >= 5) return "context"
+    // Passive context: only respond if there's a clear question signal
+    // Removed: bare word-count check was firing on every statement ≥5 words
+    // if (words.length >= 5) return "context"
 
     return "none"
 }

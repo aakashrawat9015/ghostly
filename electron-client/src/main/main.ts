@@ -55,6 +55,19 @@ app.whenReady().then(() => {
         mainWindow?.webContents.send("ai:answer", result)
     })
 
+    // ✅ Stream chunks to overlay as tokens arrive — shows text before full response is done
+    workerBridge.onResultChunk(({ accumulated }) => {
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+            overlayWindow.webContents.send("ai:answer:chunk", accumulated)
+        }
+    })
+
+    workerBridge.onSummary((text) => {
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+            overlayWindow.webContents.send("ai:summary", text)
+        }
+    })
+
     workerBridge.onTranscriptPartial((text) => {
         if (overlayWindow && !overlayWindow.isDestroyed()) {
             console.log("[MAIN → RENDERER] transcript:partial", text.slice(0, 50))

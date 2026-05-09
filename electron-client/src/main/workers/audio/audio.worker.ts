@@ -8,25 +8,35 @@ import { cleanTranscript, isMeaningful, prepareForProcessing } from "../../utils
 const DEBUG_AUDIO = process.env.DEBUG_AUDIO === "true"
 const DEBUG_LLM = process.env.DEBUG_LLM === "true"
 
-// const TARGET_CHUNK_SIZE = 17640
-const TARGET_CHUNK_SIZE = 6400
+const TARGET_CHUNK_SIZE = 3200  // 100ms @ 16kHz — was 6400 (200ms), smaller = faster partials
 
-const FLUSH_AFTER_MS = 500
-const PARTIAL_THROTTLE_MS = 200
+const FLUSH_AFTER_MS = 150      // was 300ms
+const PARTIAL_THROTTLE_MS = 80  // was 150ms
+const DEBOUNCE_MS = 150         // was 300ms — questions don't need 300ms wait
 
-const DEBOUNCE_MS = 600
+// Summary: trigger after 30s of no Q&A, with at least 5 new finals accumulated
+const SUMMARY_IDLE_MS = 30_000
+const SUMMARY_MIN_FINALS = 5
 
 let started = false
 let dg: DeepgramService | null = null
 let assistant: MeetingAssistant | null = null
+let groq: GroqService | null = null
 
 let lastUpdate = Date.now()
 let llmRunning = false
+let lastQAAt = 0          // timestamp of last answered Q&A
+let summaryRunning = false
+
+// Buffer of finals since last summary/Q&A — used to build summary text
+let summaryBuffer: string[] = []
 
 let lastPartial = ""
 let lastFinal = ""
 let lastPartialSentAt = 0
 let hasNewFinal = false
+
+let summaryTimer: NodeJS.Timeout | null = null
 
 let q: Buffer[] = []
 let qBytes = 0
@@ -42,6 +52,9 @@ let framesOut = 0
 function resetSessionState() {
     lastUpdate = Date.now()
     llmRunning = false
+    lastQAAt = 0
+    summaryRunning = false
+    summaryBuffer = []
 
     lastPartial = ""
     lastFinal = ""
@@ -63,8 +76,9 @@ function startAssistant() {
     if (assistant) return
     const key = process.env.GROQ_API_KEY
     if (!key) throw new Error("Missing GROQ_API_KEY")
-    assistant = new MeetingAssistant(new GroqService(key), {
-        enableRefinement: true
+    groq = new GroqService(key)
+    assistant = new MeetingAssistant(groq, {
+        enableRefinement: false  // ✅ Disabled: saves one full Groq round-trip per utterance (~500-1500ms)
     })
 }
 
@@ -122,6 +136,10 @@ async function tryLLM() {
                 console.log(`  Text: "${result.text.substring(0, 100)}..."`)
             }
 
+            // Track last Q&A time and reset summary buffer
+            lastQAAt = Date.now()
+            summaryBuffer = []
+
             // Send intent for UI status
             parentPort?.postMessage({
                 type: "intent",
@@ -149,8 +167,48 @@ async function tryLLM() {
     }
 }
 
-function startDeepgram(mode: STTMode = "general") {
-    if (dg) return
+async function trySummary() {
+    if (!started || !groq) return
+    if (summaryRunning || llmRunning) return
+    if (summaryBuffer.length < SUMMARY_MIN_FINALS) return
+
+    const now = Date.now()
+    const idleSinceQA = now - (lastQAAt || now - SUMMARY_IDLE_MS - 1)
+    if (idleSinceQA < SUMMARY_IDLE_MS) return
+
+    summaryRunning = true
+    const text = summaryBuffer.join(" ")
+    summaryBuffer = []   // clear so next batch starts fresh
+    lastQAAt = now       // reset idle clock
+
+    if (DEBUG_LLM) console.log(`[Worker] 📋 Generating summary for: "${text.slice(0, 80)}..."`)
+
+    try {
+        const summary = await groq.generateAnswer({
+            transcript: text,
+            systemPrompt: `You are a live meeting assistant. Summarize what the speaker just said in 2-3 tight bullet points.
+RULES:
+- Be concise — each bullet max 12 words
+- Capture the key points only, no filler
+- Start each bullet with •
+- No intro text, no "The speaker said", just the bullets`,
+            userPrompt: `Summarize this:\n"${text}"`,
+            temperature: 0.2,
+            maxTokens: 120,
+        })
+
+        if (summary && summary !== "No answer generated.") {
+            if (DEBUG_LLM) console.log(`[Worker] 📋 Summary: ${summary}`)
+            parentPort?.postMessage({ type: "summary", payload: summary })
+        }
+    } catch (e: any) {
+        console.error("[Worker] Summary error:", e?.message)
+    } finally {
+        summaryRunning = false
+    }
+}
+
+function startDeepgram(mode: STTMode = "general") {    if (dg) return
     const apiKey = process.env.DEEPGRAM_API_KEY
     if (!apiKey) throw new Error("Missing DEEPGRAM_API_KEY")
 
@@ -172,6 +230,9 @@ function startDeepgram(mode: STTMode = "general") {
             // Add to conversation history
             assistant?.addFinalTranscript(cleaned)
 
+            // Accumulate for summary (only when no Q&A is happening)
+            summaryBuffer.push(cleaned)
+
             // Mark as ready for LLM processing
             hasNewFinal = true
 
@@ -184,6 +245,9 @@ function startDeepgram(mode: STTMode = "general") {
                 type: "transcript-final",
                 payload: cleaned
             })
+
+            // ✅ Fire LLM immediately instead of waiting for next poll tick
+            setTimeout(tryLLM, DEBOUNCE_MS)
             return
         }
 
@@ -257,13 +321,18 @@ function startTimers() {
             if (!started || !dg || qBytes === 0) return
             if (Date.now() - lastAudioAt < FLUSH_AFTER_MS) return
             flushRemainder("timeout")
-        }, 100)
+        }, 50)  // was 100ms — check more often to match lower FLUSH_AFTER_MS
         flushTimer.unref?.()
     }
 
     if (!llmTimer) {
-        llmTimer = setInterval(tryLLM, 150)
+        llmTimer = setInterval(tryLLM, 500) // safety net only — primary trigger is setTimeout in STT callback
         llmTimer.unref?.()
+    }
+
+    if (!summaryTimer) {
+        summaryTimer = setInterval(trySummary, 5000) // check every 5s
+        summaryTimer.unref?.()
     }
 
     if (DEBUG_AUDIO && !statsTimer) {
@@ -279,8 +348,9 @@ function startTimers() {
 function stopTimers() {
     if (flushTimer) clearInterval(flushTimer)
     if (llmTimer) clearInterval(llmTimer)
+    if (summaryTimer) clearInterval(summaryTimer)
     if (statsTimer) clearInterval(statsTimer)
-    flushTimer = llmTimer = statsTimer = null
+    flushTimer = llmTimer = summaryTimer = statsTimer = null
 }
 
 // ═══════════════════════════════════════════════════════════════

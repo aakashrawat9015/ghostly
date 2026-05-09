@@ -25,7 +25,7 @@ export class MeetingAssistant {
     private responseGenerator: ResponseGenerator
     private refiner: TranscriptRefiner
 
-    private readonly MAX_SHORT_TERM = 5
+    private readonly MAX_SHORT_TERM = 3  // last 3 sentences is enough context
 
     constructor(
         groq: GroqService,
@@ -172,7 +172,7 @@ export class MeetingAssistant {
         }
 
         const full = parts.join("\n")
-        const max = this.opts.maxContextChars ?? 6000
+        const max = this.opts.maxContextChars ?? 800  // was 6000 — trim hard, Groq is faster with less input
 
         return full.length > max ? "..." + full.slice(-max) : full
     }
