@@ -113,7 +113,7 @@ export class MeetingAssistant {
         // STEP 3: GENERATE RESPONSE
         // ═══════════════════════════════════════════════════════
 
-        const fullContext = this.buildConversationHistory(classification.type === "followup")
+        const fullContext = this.buildConversationHistory(classification.type === "followup", latest)
 
         const responseContext: ResponseContext = {
             input: latest,
@@ -153,7 +153,7 @@ export class MeetingAssistant {
         }
     }
 
-    private buildConversationHistory(isFollowUp: boolean): string {
+    private buildConversationHistory(isFollowUp: boolean, excludeLatest?: string): string {
         const parts: string[] = []
 
         if (this.longTerm) {
@@ -161,20 +161,24 @@ export class MeetingAssistant {
         }
 
         if (isFollowUp && this.lastQuestion && this.lastAnswer) {
-            parts.push(`\n[Previous Q&A]:`)
+            parts.push(`[Previous Q&A]:`)
             parts.push(`Q: ${this.lastQuestion}`)
             parts.push(`A: ${this.lastAnswer}`)
         }
 
-        if (this.shortTerm.length > 0) {
-            parts.push(`\n[Recent conversation]:`)
-            parts.push(this.shortTerm.join(" "))
+        // Exclude the current question from context — it's already in the user prompt
+        const contextLines = excludeLatest
+            ? this.shortTerm.filter(t => t !== excludeLatest)
+            : this.shortTerm
+
+        if (contextLines.length > 0) {
+            parts.push(contextLines.join(" "))
         }
 
         const full = parts.join("\n")
-        const max = this.opts.maxContextChars ?? 800  // was 6000 — trim hard, Groq is faster with less input
+        const max = this.opts.maxContextChars ?? 800
 
-        return full.length > max ? "..." + full.slice(-max) : full
+        return full.length > max ? full.slice(-max) : full
     }
 
     reset() {
@@ -191,5 +195,4 @@ export class MeetingAssistant {
 
     getContext(): string {
         return this.buildConversationHistory(false)
-    }
-}
+    }}

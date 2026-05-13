@@ -16,6 +16,7 @@ export type WorkerRequest =
     | { type: "start"; mode?: STTMode }
     | { type: "stop" }
     | { type: "set-mode"; mode: STTMode }
+    | { type: "set-active-file"; payload: string }
 
 export type WorkerResponse =
     | { type: "result"; payload: AIResult }
@@ -26,6 +27,7 @@ export type WorkerResponse =
     | { type: "log"; payload: string }
     | { type: "transcript-partial"; payload: string }
     | { type: "transcript-final"; payload: string }
+    | { type: "transcript-final-corrected"; payload: string }
     | { type: "transcript-clear" }
 
 type ResultCallback = (data: AIResult) => void
@@ -36,6 +38,7 @@ type ErrorCallback = (err: string) => void
 type LogCallback = (msg: string) => void
 type TranscriptPartialCallback = (text: string) => void
 type TranscriptFinalCallback = (text: string) => void
+type TranscriptFinalCorrectedCallback = (text: string) => void
 type TranscriptClearCallback = () => void
 
 export class WorkerBridge {
@@ -50,6 +53,7 @@ export class WorkerBridge {
     private onLogCb?: LogCallback
     private onTranscriptPartialCb?: TranscriptPartialCallback
     private onTranscriptFinalCb?: TranscriptFinalCallback
+    private onTranscriptFinalCorrectedCb?: TranscriptFinalCorrectedCallback
     private onTranscriptClearCb?: TranscriptClearCallback
 
     // --- batching state ---
@@ -86,6 +90,7 @@ export class WorkerBridge {
             if (msg.type === "log") this.onLogCb?.(msg.payload)
             if (msg.type === "transcript-partial") this.onTranscriptPartialCb?.(msg.payload)
             if (msg.type === "transcript-final") this.onTranscriptFinalCb?.(msg.payload)
+            if (msg.type === "transcript-final-corrected") this.onTranscriptFinalCorrectedCb?.(msg.payload)
             if (msg.type === "transcript-clear") this.onTranscriptClearCb?.()
         })
 
@@ -173,25 +178,20 @@ export class WorkerBridge {
         this.worker?.postMessage({ type: "stop" })
     }
 
+    setActiveFile(filePath: string) {
+        this.worker?.postMessage({ type: "set-active-file", payload: filePath })
+    }
+
     onResult(cb: ResultCallback) { this.onResultCb = cb }
     onResultChunk(cb: ResultChunkCallback) { this.onResultChunkCb = cb }
     onIntent(cb: IntentCallback) { this.onIntentCb = cb }
     onSummary(cb: SummaryCallback) { this.onSummaryCb = cb }
-    onError(cb: ErrorCallback) {
-        this.onErrorCb = cb
-    }
-    onLog(cb: LogCallback) {
-        this.onLogCb = cb
-    }
-    onTranscriptPartial(cb: TranscriptPartialCallback) {
-        this.onTranscriptPartialCb = cb
-    }
-    onTranscriptFinal(cb: TranscriptFinalCallback) {
-        this.onTranscriptFinalCb = cb
-    }
-    onTranscriptClear(cb: TranscriptClearCallback) {
-        this.onTranscriptClearCb = cb
-    }
+    onError(cb: ErrorCallback) { this.onErrorCb = cb }
+    onLog(cb: LogCallback) { this.onLogCb = cb }
+    onTranscriptPartial(cb: TranscriptPartialCallback) { this.onTranscriptPartialCb = cb }
+    onTranscriptFinal(cb: TranscriptFinalCallback) { this.onTranscriptFinalCb = cb }
+    onTranscriptFinalCorrected(cb: TranscriptFinalCorrectedCallback) { this.onTranscriptFinalCorrectedCb = cb }
+    onTranscriptClear(cb: TranscriptClearCallback) { this.onTranscriptClearCb = cb }
 
     terminate() {
         this.isTerminated = true

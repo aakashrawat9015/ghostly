@@ -58,10 +58,22 @@ contextBridge.exposeInMainWorld("api", {
         return () => ipcRenderer.removeListener("transcript:final", handler)
     },
 
+    // Corrected transcript — replaces the last final with the LLM-cleaned version
+    onTranscriptFinalCorrected: (cb: (text: string) => void) => {
+        const handler = (_: unknown, text: string) => cb(text)
+        ipcRenderer.on("transcript:final:corrected", handler)
+        return () => ipcRenderer.removeListener("transcript:final:corrected", handler)
+    },
+
     onTranscriptClear: (cb: () => void) => {
         const handler = () => cb()
         ipcRenderer.on("transcript:clear", handler)
         return () => ipcRenderer.removeListener("transcript:clear", handler)
+    },
+
+    // Send active file path to main process for keyword extraction
+    setActiveFile: (filePath: string) => {
+        ipcRenderer.send("active-file:set", filePath)
     },
 
     // ✅ Streaming: called with accumulated text as tokens arrive
@@ -79,6 +91,10 @@ contextBridge.exposeInMainWorld("api", {
 
     setOverlayInteractive: (interactive: boolean): Promise<Reply> =>
         ipcRenderer.invoke("overlay:setInteractive", interactive),
+
+    resizeOverlay: (height: number) => {
+        ipcRenderer.send("overlay:resize", height)
+    },
 
     setSTTMode: (mode: any): Promise<Reply> =>
         ipcRenderer.invoke("audio:mode:set", mode),

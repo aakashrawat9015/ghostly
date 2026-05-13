@@ -32,7 +32,7 @@ export class DeepgramService {
     private connected = false
     private isConnecting = false
     private isStopped = false
-    private currentMode: STTMode = "general"
+    private currentMode: STTMode = "technical"
 
     private keepaliveTimer?: NodeJS.Timeout
     private reconnectTimer?: NodeJS.Timeout
@@ -62,16 +62,16 @@ export class DeepgramService {
     private generateUrl(mode: STTMode): string {
         const baseUrl = "wss://api.deepgram.com/v1/listen"
         const params = new URLSearchParams({
-            model: "nova-3",
+            model: "nova-2",
             language: "en-US",
             encoding: "linear16",
             sample_rate: "16000",
             channels: "1",
             interim_results: "true",
             punctuate: "true",
-            smart_format: "false",  // was true — adds server-side post-processing latency
+            smart_format: "true",  // was true — adds server-side post-processing latency
             vad_events: "true",
-            endpointing: "300",
+            endpointing: "500",
             utterance_end_ms: "1000",
             profanity_filter: "false",
             diarize: "false",

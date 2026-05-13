@@ -3,7 +3,7 @@ import type { IntentType } from "./triggers"
 
 // ── Cached domain context (sent once, short) ─────────────────
 // Keep this minimal — every extra token adds latency on Groq
-const DOMAIN = `You are assisting in a live meeting. Answer ONLY based on what was said in the transcript. Do NOT introduce topics, technologies, or concepts not mentioned. No "I". Direct answers only. If the question is vague, answer the most literal interpretation.`
+const DOMAIN = `You are a technical assistant in a live meeting. Answer questions directly and accurately using your knowledge. Be concise. No filler. No "I". No clarifying questions.`
 
 export const PROMPTS: Record<Exclude<IntentType, "none">, string> = {
     question: `${DOMAIN}
@@ -27,11 +27,18 @@ export function buildUserPrompt(
     latest: string,
     intent: Exclude<IntentType, "none">
 ): string {
-    const trimmedContext = (context || "").trim().slice(-400)
+    const trimmedContext = (context || "").trim().slice(-500)
 
-    return trimmedContext
-        ? `TRANSCRIPT CONTEXT (only use this, nothing else):\n${trimmedContext}\n\nQUESTION FROM TRANSCRIPT: "${latest}"`
-        : `QUESTION FROM TRANSCRIPT: "${latest}"\n(No prior context — answer only what this question literally asks.)`
+    if (trimmedContext) {
+        return `BACKGROUND (recent conversation — for context only, do NOT echo this back):
+${trimmedContext}
+
+QUESTION TO ANSWER: "${latest}"
+
+Answer the QUESTION above using your knowledge. Only reference the BACKGROUND if it directly helps answer the question.`
+    }
+
+    return `QUESTION TO ANSWER: "${latest}"`
 }
 
 export const SYSTEM_PROMPT = PROMPTS.question

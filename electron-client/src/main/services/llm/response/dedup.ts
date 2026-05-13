@@ -15,7 +15,8 @@ export class ResponseDeduplicator {
 
     private readonly MAX_HISTORY = 5
     private readonly SIMILARITY_THRESHOLD = 0.85
-    private readonly MIN_TIME_BETWEEN_SIMILAR = 15000  // 15s
+    private readonly MIN_TIME_BETWEEN_SIMILAR = 8000   // was 15s — reduced so same Q asked again after 8s gets answered
+    private readonly HISTORY_WINDOW_MS = 10000          // was 60s — only check last 10s of history
 
     isDuplicate(newAnswer: string, currentTime: number): boolean {
         // Check against last answer
@@ -36,10 +37,10 @@ export class ResponseDeduplicator {
         // Check against recent history
         for (const entry of this.state.answerHistory) {
             const timeSince = currentTime - entry.timestamp
-            if (timeSince > 60000) continue  // Skip old answers (>1min)
+            if (timeSince > this.HISTORY_WINDOW_MS) continue  // skip old answers
 
             const similarity = this.calculateSimilarity(newAnswer, entry.text)
-            if (similarity > 0.9) {
+            if (similarity > 0.95) {  // was 0.9 — only block near-identical answers
                 if (DEBUG) {
                     console.log(`[Dedup] ❌ Matches answer from ${Math.floor(timeSince / 1000)}s ago`)
                 }

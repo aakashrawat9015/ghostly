@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron"
+import { app, BrowserWindow, ipcMain } from "electron"
 import path from "path"
 import { Worker } from "worker_threads"
 import "dotenv/config"
@@ -82,6 +82,14 @@ app.whenReady().then(() => {
         }
     })
 
+    // Corrected transcript — replaces the raw final on the overlay
+    workerBridge.onTranscriptFinalCorrected((text) => {
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+            if (DEBUG) console.log("[MAIN → RENDERER] transcript:final:corrected", text.slice(0, 50))
+            overlayWindow.webContents.send("transcript:final:corrected", text)
+        }
+    })
+
     workerBridge.onTranscriptClear(() => {
         if (overlayWindow && !overlayWindow.isDestroyed()) {
             console.log("[MAIN → RENDERER] transcript:clear")
@@ -110,6 +118,12 @@ app.whenReady().then(() => {
     if (coordinator && overlayWindow) {
         registerIpc({ coordinator, overlayWindow })
     }
+
+    // Active file path from renderer → forward to worker for keyword extraction
+    ipcMain.on("active-file:set", (_evt, filePath: string) => {
+        if (DEBUG) console.log("[MAIN] active-file:set →", filePath)
+        workerBridge.setActiveFile(filePath ?? "")
+    })
 })
 
 app.on("before-quit", () => {

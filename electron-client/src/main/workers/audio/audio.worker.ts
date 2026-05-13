@@ -3,69 +3,81 @@ import { parentPort } from "worker_threads"
 import { DeepgramService, STTMode } from "../../services/stt/DeepgramService"
 import { GroqService } from "../../services/llm/GroqService"
 import { MeetingAssistant } from "../../services/llm/MeetingAssistant"
+import { TranscriptionCorrectionService } from "../../services/stt/TranscriptionCorrectionService"
+import { KeywordExtractor } from "../../services/stt/KeywordExtractor"
 import { cleanTranscript, isMeaningful, prepareForProcessing } from "../../utils/transcript"
 
 const DEBUG_AUDIO = process.env.DEBUG_AUDIO === "true"
-const DEBUG_LLM = process.env.DEBUG_LLM === "true"
+const DEBUG_LLM   = process.env.DEBUG_LLM   === "true"
 
-const TARGET_CHUNK_SIZE = 3200  // 100ms @ 16kHz — was 6400 (200ms), smaller = faster partials
+const TARGET_CHUNK_SIZE   = 3200   // 100ms @ 16kHz
+const FLUSH_AFTER_MS      = 150
+const PARTIAL_THROTTLE_MS = 80
+const DEBOUNCE_MS         = 150
 
-const FLUSH_AFTER_MS = 150      // was 300ms
-const PARTIAL_THROTTLE_MS = 80  // was 150ms
-const DEBOUNCE_MS = 150         // was 300ms — questions don't need 300ms wait
-
-// Summary: trigger after 30s of no Q&A, with at least 5 new finals accumulated
-const SUMMARY_IDLE_MS = 30_000
+const SUMMARY_IDLE_MS  = 30_000
 const SUMMARY_MIN_FINALS = 5
 
-let started = false
+// Early-trigger: fire Groq on a partial that already looks like a complete question.
+// If the final arrives within this window for the same question, skip it.
+const EARLY_TRIGGER_WINDOW_MS = 8000
+
+// ── State ─────────────────────────────────────────────────────
+let started    = false
 let dg: DeepgramService | null = null
 let assistant: MeetingAssistant | null = null
 let groq: GroqService | null = null
+let correctionService: TranscriptionCorrectionService | null = null
+let keywordExtractor: KeywordExtractor | null = null
+let activeFilePath = ""
 
-let lastUpdate = Date.now()
-let llmRunning = false
-let lastQAAt = 0          // timestamp of last answered Q&A
+let lastUpdate  = Date.now()
+let llmRunning  = false
+let lastQAAt    = 0
 let summaryRunning = false
-
-// Buffer of finals since last summary/Q&A — used to build summary text
 let summaryBuffer: string[] = []
 
-let lastPartial = ""
-let lastFinal = ""
+let lastPartial      = ""
+let lastFinal        = ""
 let lastPartialSentAt = 0
-let hasNewFinal = false
+let hasNewFinal      = false
 
-let summaryTimer: NodeJS.Timeout | null = null
+// Track early-trigger so the final doesn't double-fire
+let earlyTriggerText = ""
+let earlyTriggerAt   = 0
 
 let q: Buffer[] = []
 let qBytes = 0
 let lastAudioAt = 0
 
-let flushTimer: NodeJS.Timeout | null = null
-let statsTimer: NodeJS.Timeout | null = null
-let llmTimer: NodeJS.Timeout | null = null
+let flushTimer:   NodeJS.Timeout | null = null
+let llmTimer:     NodeJS.Timeout | null = null
+let summaryTimer: NodeJS.Timeout | null = null
+let statsTimer:   NodeJS.Timeout | null = null
 
-let bytesIn = 0
+let bytesIn  = 0
 let framesOut = 0
 
+// ── Helpers ───────────────────────────────────────────────────
+
 function resetSessionState() {
-    lastUpdate = Date.now()
-    llmRunning = false
-    lastQAAt = 0
+    lastUpdate  = Date.now()
+    llmRunning  = false
+    lastQAAt    = 0
     summaryRunning = false
-    summaryBuffer = []
+    summaryBuffer  = []
 
-    lastPartial = ""
-    lastFinal = ""
+    lastPartial       = ""
+    lastFinal         = ""
     lastPartialSentAt = 0
-    hasNewFinal = false
+    hasNewFinal       = false
+    earlyTriggerText  = ""
+    earlyTriggerAt    = 0
 
-    q = []
+    q      = []
     qBytes = 0
     lastAudioAt = 0
-
-    bytesIn = 0
+    bytesIn  = 0
     framesOut = 0
 
     assistant?.reset()
@@ -77,95 +89,100 @@ function startAssistant() {
     const key = process.env.GROQ_API_KEY
     if (!key) throw new Error("Missing GROQ_API_KEY")
     groq = new GroqService(key)
-    assistant = new MeetingAssistant(groq, {
-        enableRefinement: false  // ✅ Disabled: saves one full Groq round-trip per utterance (~500-1500ms)
-    })
+    assistant = new MeetingAssistant(groq, { enableRefinement: false })
+    correctionService = new TranscriptionCorrectionService(key)
+    keywordExtractor  = new KeywordExtractor()
 }
 
-// ✅ UPDATED: Two-stage processing with original preservation
-async function tryLLM() {
+/**
+ * Returns true if the partial already looks like a complete question —
+ * strong enough signal to fire Groq before Deepgram finalises.
+ */
+function looksLikeCompleteQuestion(text: string): boolean {
+    const t = text.trim()
+    if (!t.endsWith("?")) return false
+    if (t.split(/\s+/).length < 4) return false
+    const lower = t.toLowerCase()
+    // Block social / rhetorical tails
+    if (/^(hey|hi|hello|how are|how have|how's|what's up)\b/.test(lower)) return false
+    if (/^(right|ok|okay|yeah|correct|huh|really)\?$/.test(lower)) return false
+    return true
+}
+
+/** Jaccard word-overlap similarity (0–1) */
+function stringSimilarity(a: string, b: string): number {
+    const wa = new Set(a.toLowerCase().split(/\s+/))
+    const wb = new Set(b.toLowerCase().split(/\s+/))
+    const inter = [...wa].filter(w => wb.has(w)).length
+    const union = new Set([...wa, ...wb]).size
+    return union === 0 ? 0 : inter / union
+}
+
+// ── Core LLM runner ───────────────────────────────────────────
+
+async function tryLLMWithText(text: string, source: "partial" | "final") {
     if (!started || !assistant) return
     if (llmRunning) return
-    if (!hasNewFinal) return
-    if (!lastFinal) return
 
-    const now = Date.now()
-    const msSinceUpdate = now - lastUpdate
+    const { cleaned, shouldProcess } = prepareForProcessing(text)
+    if (!shouldProcess) return
 
-    if (msSinceUpdate < DEBOUNCE_MS) return
-
-    // Save current final before clearing flag
-    const currentFinal = lastFinal
-
-    // Clear flag to prevent reprocessing
-    hasNewFinal = false
     llmRunning = true
+    if (DEBUG_LLM) console.log(`[Worker] ⚡ ${source.toUpperCase()}: "${cleaned.slice(0, 70)}..."`)
 
     try {
-        // ✅ NEW: Two-stage processing
-        const { original, cleaned, shouldProcess } = prepareForProcessing(currentFinal)
-
-        if (!shouldProcess) {
-            if (DEBUG_LLM) {
-                console.log(`[Worker] ⏭️ Not meaningful: "${original}"`)
-            }
-            llmRunning = false
-            return
-        }
-
-        if (DEBUG_LLM) {
-            console.log(`\n[Worker] 📝 ORIGINAL: "${original}"`)
-            if (cleaned !== original) {
-                console.log(`[Worker] 🧹 CLEANED:  "${cleaned}"`)
-            }
-            console.log(`[Worker] 🎯 Processing: "${cleaned}"`)
-        }
-
-        // MeetingAssistant now handles:
-        // 1. Classification (via InputClassifier)
-        // 2. Decision making (via DecisionEngine)  
-        // 3. Response generation (via ResponseGenerator)
-        // ✅ Use cleaned version for processing
         const result = await assistant.maybeAnswer(cleaned)
 
         if (result) {
-            if (DEBUG_LLM) {
-                console.log(`[Worker] ✅ Answer generated`)
-                console.log(`  Intent: ${result.intent}`)
-                console.log(`  Confidence: ${result.confidence}`)
-                console.log(`  Text: "${result.text.substring(0, 100)}..."`)
-            }
+            if (DEBUG_LLM) console.log(`[Worker] ✅ Answer (${source}): "${result.text.slice(0, 80)}..."`)
 
-            // Track last Q&A time and reset summary buffer
             lastQAAt = Date.now()
             summaryBuffer = []
 
-            // Send intent for UI status
-            parentPort?.postMessage({
-                type: "intent",
-                payload: { intent: result.intent }
-            })
-
-            // Send answer
-            parentPort?.postMessage({
-                type: "result",
-                payload: result
-            })
-        } else {
-            if (DEBUG_LLM) {
-                console.log(`[Worker] ⏭️ No response needed: "${cleaned.substring(0, 50)}..."`)
+            if (source === "partial") {
+                earlyTriggerText = cleaned
+                earlyTriggerAt   = Date.now()
             }
+
+            parentPort?.postMessage({ type: "intent",  payload: { intent: result.intent } })
+            parentPort?.postMessage({ type: "result",  payload: result })
+        } else {
+            if (DEBUG_LLM) console.log(`[Worker] ⏭️ No response (${source}): "${cleaned.slice(0, 50)}..."`)
         }
     } catch (e: any) {
-        console.error(`[Worker] ❌ Error processing "${currentFinal}":`, e)
-        parentPort?.postMessage({
-            type: "error",
-            payload: `Error: ${e?.message ?? e}`
-        })
+        console.error(`[Worker] ❌ LLM error (${source}):`, e?.message)
+        parentPort?.postMessage({ type: "error", payload: `Error: ${e?.message ?? e}` })
     } finally {
         llmRunning = false
     }
 }
+
+async function tryLLM() {
+    if (!started || !assistant) return
+    if (llmRunning) return
+    if (!hasNewFinal || !lastFinal) return
+    if (Date.now() - lastUpdate < DEBOUNCE_MS) return
+
+    const currentFinal = lastFinal
+    hasNewFinal = false
+
+    // Skip if we already answered this via early partial trigger
+    if (earlyTriggerText && (Date.now() - earlyTriggerAt) < EARLY_TRIGGER_WINDOW_MS) {
+        const { cleaned } = prepareForProcessing(currentFinal)
+        if (cleaned && (
+            cleaned.includes(earlyTriggerText) ||
+            earlyTriggerText.includes(cleaned)  ||
+            stringSimilarity(cleaned, earlyTriggerText) > 0.8
+        )) {
+            if (DEBUG_LLM) console.log(`[Worker] ⏭️ Final skipped — already answered via early trigger`)
+            return
+        }
+    }
+
+    await tryLLMWithText(currentFinal, "final")
+}
+
+// ── Summary ───────────────────────────────────────────────────
 
 async function trySummary() {
     if (!started || !groq) return
@@ -178,27 +195,21 @@ async function trySummary() {
 
     summaryRunning = true
     const text = summaryBuffer.join(" ")
-    summaryBuffer = []   // clear so next batch starts fresh
-    lastQAAt = now       // reset idle clock
+    summaryBuffer = []
+    lastQAAt = now
 
-    if (DEBUG_LLM) console.log(`[Worker] 📋 Generating summary for: "${text.slice(0, 80)}..."`)
+    if (DEBUG_LLM) console.log(`[Worker] 📋 Summary: "${text.slice(0, 80)}..."`)
 
     try {
         const summary = await groq.generateAnswer({
             transcript: text,
-            systemPrompt: `You are a live meeting assistant. Summarize what the speaker just said in 2-3 tight bullet points.
-RULES:
-- Be concise — each bullet max 12 words
-- Capture the key points only, no filler
-- Start each bullet with •
-- No intro text, no "The speaker said", just the bullets`,
-            userPrompt: `Summarize this:\n"${text}"`,
+            systemPrompt: `Live meeting assistant. Summarize in 2-3 tight bullet points.
+- Each bullet max 12 words. Start with •. No intro text.`,
+            userPrompt: `Summarize:\n"${text}"`,
             temperature: 0.2,
             maxTokens: 120,
         })
-
         if (summary && summary !== "No answer generated.") {
-            if (DEBUG_LLM) console.log(`[Worker] 📋 Summary: ${summary}`)
             parentPort?.postMessage({ type: "summary", payload: summary })
         }
     } catch (e: any) {
@@ -208,85 +219,80 @@ RULES:
     }
 }
 
-function startDeepgram(mode: STTMode = "general") {    if (dg) return
+// ── Deepgram ──────────────────────────────────────────────────
+
+function startDeepgram(mode: STTMode = "general") {
+    if (dg) return
     const apiKey = process.env.DEEPGRAM_API_KEY
     if (!apiKey) throw new Error("Missing DEEPGRAM_API_KEY")
 
     dg = new DeepgramService(apiKey)
 
     dg.start((text: string, isFinal: boolean) => {
-        // ✅ Clean transcript immediately
         const cleaned = cleanTranscript(text)
         if (!cleaned) return
 
         if (isFinal) {
-            // Skip duplicate finals
             if (cleaned === lastFinal) return
 
-            lastFinal = cleaned
+            lastFinal   = cleaned
             lastPartial = ""
-            lastUpdate = Date.now()
+            lastUpdate  = Date.now()
 
-            // Add to conversation history
             assistant?.addFinalTranscript(cleaned)
-
-            // Accumulate for summary (only when no Q&A is happening)
             summaryBuffer.push(cleaned)
-
-            // Mark as ready for LLM processing
             hasNewFinal = true
 
-            if (DEBUG_LLM) {
-                console.log(`[STT FINAL] ${cleaned}`)
-            }
+            if (DEBUG_LLM) console.log(`[STT FINAL] ${cleaned}`)
 
-            // Send to UI
-            parentPort?.postMessage({
-                type: "transcript-final",
-                payload: cleaned
-            })
-
-            // ✅ Fire LLM immediately instead of waiting for next poll tick
+            parentPort?.postMessage({ type: "transcript-final", payload: cleaned })
             setTimeout(tryLLM, DEBOUNCE_MS)
+
+            // Async correction — non-blocking
+            if (correctionService && keywordExtractor) {
+                const { keywords } = keywordExtractor.extract(activeFilePath)
+                correctionService.correctTranscript(cleaned, activeFilePath, keywords)
+                    .then(({ corrected, latencyMs, usedFallback }) => {
+                        if (!usedFallback && corrected !== cleaned) {
+                            if (DEBUG_LLM) console.log(`[Correction] ${latencyMs}ms | "${cleaned}" → "${corrected}"`)
+                            lastFinal = corrected
+                            assistant?.addFinalTranscript(corrected)
+                            parentPort?.postMessage({ type: "transcript-final-corrected", payload: corrected })
+                        }
+                    })
+                    .catch(e => { if (DEBUG_LLM) console.error("[Correction] Error:", e?.message) })
+            }
             return
         }
 
-        // PARTIAL TRANSCRIPT HANDLING
-
-        // Skip duplicate partials
+        // ── PARTIAL ──────────────────────────────────────────
         if (cleaned === lastPartial) return
-
         lastPartial = cleaned
 
-        // ✅ Filter out meaningless partials (not requiring question format)
         if (!isMeaningful(cleaned, false)) return
 
-        // Throttle partial updates
         const now = Date.now()
         if (now - lastPartialSentAt < PARTIAL_THROTTLE_MS) return
         lastPartialSentAt = now
 
-        // Send to UI
-        parentPort?.postMessage({
-            type: "transcript-partial",
-            payload: cleaned
-        })
+        parentPort?.postMessage({ type: "transcript-partial", payload: cleaned })
+
+        // ⚡ EARLY TRIGGER — fire Groq while speaker is still talking
+        if (!llmRunning && looksLikeCompleteQuestion(cleaned)) {
+            if (DEBUG_LLM) console.log(`[Worker] ⚡ Early trigger on partial: "${cleaned.slice(0, 60)}..."`)
+            tryLLMWithText(cleaned, "partial")
+        }
     })
 }
 
 async function stopDeepgram() {
     if (!dg) return
-    try {
-        await dg.finish(1500)
-    } finally {
-        dg = null
-    }
+    try { await dg.finish(1500) } finally { dg = null }
 }
 
-function qPush(b: Buffer) {
-    q.push(b)
-    qBytes += b.length
-}
+// ── Audio queue ───────────────────────────────────────────────
+
+function qPush(b: Buffer) { q.push(b); qBytes += b.length }
 
 function qDrainExact(n: number): Buffer | null {
     if (qBytes < n) return null
@@ -307,13 +313,12 @@ function qDrainExact(n: number): Buffer | null {
 function flushRemainder(reason: "timeout" | "stop") {
     if (!dg || qBytes === 0) return
     const merged = Buffer.concat(q, qBytes)
-    q = []
-    qBytes = 0
+    q = []; qBytes = 0
     dg.sendAudio(merged)
-    if (DEBUG_AUDIO) {
-        console.log(`[Worker] Sent audio remainder (${reason}): ${merged.length} bytes`)
-    }
+    if (DEBUG_AUDIO) console.log(`[Worker] Flush (${reason}): ${merged.length} bytes`)
 }
+
+// ── Timers ────────────────────────────────────────────────────
 
 function startTimers() {
     if (!flushTimer) {
@@ -321,41 +326,35 @@ function startTimers() {
             if (!started || !dg || qBytes === 0) return
             if (Date.now() - lastAudioAt < FLUSH_AFTER_MS) return
             flushRemainder("timeout")
-        }, 50)  // was 100ms — check more often to match lower FLUSH_AFTER_MS
+        }, 50)
         flushTimer.unref?.()
     }
-
     if (!llmTimer) {
-        llmTimer = setInterval(tryLLM, 500) // safety net only — primary trigger is setTimeout in STT callback
+        llmTimer = setInterval(tryLLM, 500)  // safety net
         llmTimer.unref?.()
     }
-
     if (!summaryTimer) {
-        summaryTimer = setInterval(trySummary, 5000) // check every 5s
+        summaryTimer = setInterval(trySummary, 5000)
         summaryTimer.unref?.()
     }
-
     if (DEBUG_AUDIO && !statsTimer) {
         statsTimer = setInterval(() => {
-            console.log(`[AudioStats] in=${bytesIn}/s framesOut=${framesOut}/s buffered=${qBytes}`)
-            bytesIn = 0
-            framesOut = 0
+            console.log(`[AudioStats] in=${bytesIn}/s out=${framesOut}/s buf=${qBytes}`)
+            bytesIn = framesOut = 0
         }, 1000)
         statsTimer.unref?.()
     }
 }
 
 function stopTimers() {
-    if (flushTimer) clearInterval(flushTimer)
-    if (llmTimer) clearInterval(llmTimer)
+    if (flushTimer)   clearInterval(flushTimer)
+    if (llmTimer)     clearInterval(llmTimer)
     if (summaryTimer) clearInterval(summaryTimer)
-    if (statsTimer) clearInterval(statsTimer)
+    if (statsTimer)   clearInterval(statsTimer)
     flushTimer = llmTimer = summaryTimer = statsTimer = null
 }
 
-// ═══════════════════════════════════════════════════════════════
-// MESSAGE HANDLER
-// ═══════════════════════════════════════════════════════════════
+// ── Message handler ───────────────────────────────────────────
 
 parentPort?.on("message", async (msg) => {
     if (msg.type === "start") {
@@ -369,8 +368,14 @@ parentPort?.on("message", async (msg) => {
         return
     }
 
+    if (msg.type === "set-active-file") {
+        activeFilePath = msg.payload ?? ""
+        if (DEBUG_LLM) console.log(`[Worker] 📄 Active file: ${activeFilePath}`)
+        return
+    }
+
     if (msg.type === "set-mode") {
-        console.log(`[Worker] 🔄 Switching to mode: ${msg.mode}`)
+        console.log(`[Worker] 🔄 Mode: ${msg.mode}`)
         if (started) {
             flushRemainder("stop")
             await stopDeepgram()
@@ -381,14 +386,11 @@ parentPort?.on("message", async (msg) => {
 
     if (msg.type === "audio-chunk") {
         if (!started || !dg) return
-
         const u8 = new Uint8Array(msg.payload)
-        const b = Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength)
-
+        const b  = Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength)
         lastAudioAt = Date.now()
         qPush(b)
         if (DEBUG_AUDIO) bytesIn += b.length
-
         while (qBytes >= TARGET_CHUNK_SIZE) {
             const frame = qDrainExact(TARGET_CHUNK_SIZE)!
             dg.sendAudio(frame)
@@ -400,13 +402,12 @@ parentPort?.on("message", async (msg) => {
     if (msg.type === "stop") {
         if (!started) return
         started = false
-
         flushRemainder("stop")
         await stopDeepgram()
         stopTimers()
         resetSessionState()
-
-        assistant = null
+        assistant = correctionService = keywordExtractor = null
+        activeFilePath = ""
         console.log("[Worker] ⏹️ Stopped")
     }
 })

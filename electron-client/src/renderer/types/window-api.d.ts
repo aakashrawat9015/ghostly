@@ -31,12 +31,15 @@ declare global {
 
             onTranscriptPartial: (cb: (text: string) => void) => () => void
             onTranscriptFinal: (cb: (text: string) => void) => () => void
+            onTranscriptFinalCorrected: (cb: (text: string) => void) => () => void
             onTranscriptClear: (cb: () => void) => () => void
 
             onAIAnswerChunk: (cb: (accumulated: string) => void) => () => void
             onAISummary: (cb: (text: string) => void) => () => void
 
+            setActiveFile: (filePath: string) => void
             setOverlayInteractive: (interactive: boolean) => Promise<Reply>
+            resizeOverlay: (height: number) => void
             setSTTMode: (mode: STTMode) => Promise<Reply>
         }
     }
