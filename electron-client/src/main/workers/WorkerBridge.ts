@@ -17,6 +17,7 @@ export type WorkerRequest =
     | { type: "stop" }
     | { type: "set-mode"; mode: STTMode }
     | { type: "set-active-file"; payload: string }
+    | { type: "set-project-symbols"; payload: string[] }
 
 export type WorkerResponse =
     | { type: "result"; payload: AIResult }
@@ -180,6 +181,10 @@ export class WorkerBridge {
 
     setActiveFile(filePath: string) {
         this.worker?.postMessage({ type: "set-active-file", payload: filePath })
+    }
+
+    setProjectSymbols(symbols: string[]) {
+        this.worker?.postMessage({ type: "set-project-symbols", payload: symbols })
     }
 
     onResult(cb: ResultCallback) { this.onResultCb = cb }

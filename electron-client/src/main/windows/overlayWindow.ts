@@ -1,10 +1,9 @@
 import { BrowserWindow, screen, ipcMain } from "electron"
 import path from "path"
 
-const WIN_WIDTH = 580
-const WIN_MIN_HEIGHT = 52   // just the header bar
-const WIN_MAX_HEIGHT = 600  // cap so it never goes full screen
-const WIN_Y = 20            // px from top edge
+const WIN_WIDTH = 700
+const WIN_MIN_HEIGHT = 1 
+const WIN_MAX_HEIGHT = 600
 
 export function createOverlayWindow(isDev: boolean): BrowserWindow {
     const { width: screenWidth } = screen.getPrimaryDisplay().workAreaSize
@@ -16,14 +15,17 @@ export function createOverlayWindow(isDev: boolean): BrowserWindow {
         minHeight: WIN_MIN_HEIGHT,
         maxHeight: WIN_MAX_HEIGHT,
         x,
-        y: WIN_Y,
+        y: 0, // 👈 CHANGE THIS: Set to 0, let main.ts handle positioning
         frame: false,
         transparent: true,
-        resizable: false,       // user can't resize — we control it programmatically
+        resizable: false,
         alwaysOnTop: true,
         skipTaskbar: true,
         focusable: false,
         hasShadow: false,
+        fullscreenable: false,
+        maximizable: false,
+        minimizable: false,
         backgroundColor: "#00000000",
         show: false,
         webPreferences: {
@@ -47,16 +49,13 @@ export function createOverlayWindow(isDev: boolean): BrowserWindow {
     win.setAlwaysOnTop(true, "screen-saver")
     win.setContentProtection(true)
 
-    // ── Dynamic resize from renderer ──────────────────────────
-    // Renderer measures its own DOM height and sends it here.
-    // We clamp it and animate via setBounds for a smooth feel.
+    // ✅ FIX: Change setBounds to setSize to avoid resetting position
     ipcMain.on("overlay:resize", (_evt, contentHeight: number) => {
         if (win.isDestroyed()) return
         const clamped = Math.max(WIN_MIN_HEIGHT, Math.min(Math.ceil(contentHeight), WIN_MAX_HEIGHT))
-        const [currentX, currentY] = win.getPosition()
+        
         const [currentW] = win.getSize()
-        // setBounds is instant; use animate:true for smooth resize on macOS
-        win.setBounds({ x: currentX, y: currentY, width: currentW, height: clamped }, true)
+        win.setSize(currentW, clamped, true) 
     })
 
     if (isDev) {
@@ -67,11 +66,6 @@ export function createOverlayWindow(isDev: boolean): BrowserWindow {
             { hash: "/overlay" }
         )
     }
-
-    win.on("close", (e) => {
-        e.preventDefault()
-        win.hide()
-    })
 
     return win
 }

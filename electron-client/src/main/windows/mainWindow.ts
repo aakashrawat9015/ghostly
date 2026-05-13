@@ -1,13 +1,30 @@
-import { BrowserWindow } from "electron"
+import { BrowserWindow, screen } from "electron"
 import path from "path"
 
 export function createMainWindow(isDev: boolean): BrowserWindow {
+    const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize
+    const width = 700
+    const height = 64
+    const x = Math.floor((screenWidth / 2) - (width / 2))
+    // const y = screenHeight - height - 100 // 100px from bottom (floating)
+    const y = 60 // 60px from top (floating)
+
     const win = new BrowserWindow({
-        width: 600,
-        height: 400,
+        width,
+        height,
+        x,
+        y,
         show: false,
-        frame: true,
-        // skipTaskbar: true, // ✅ hide from taskbar
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        resizable: false,
+        hasShadow: true,
+        skipTaskbar: false,
+        fullscreenable: false,
+        maximizable: false,
+        minimizable: false,
+        backgroundColor: "#00000000",
         webPreferences: {
             preload: path.join(__dirname, "../../preload/preload.js"),
             contextIsolation: true,
@@ -16,12 +33,11 @@ export function createMainWindow(isDev: boolean): BrowserWindow {
     })
 
     win.once("ready-to-show", () => {
-        win.center()
         win.show()
-        win.focus()
     })
 
     // 🔥 Screen share protection
+    win.setAlwaysOnTop(true, "screen-saver")
     win.setContentProtection(true)
 
     if (isDev) {

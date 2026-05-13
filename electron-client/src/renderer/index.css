@@ -12,11 +12,18 @@ html,
 body,
 #root {
   margin: 0;
+  padding: 0;
   background: transparent !important;
   color: var(--text);
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
 }
 
-/* Optional: only control window uses white bg */
+* {
+  box-sizing: border-box;
+}
+
 .control-page {
-  background: #e0aaaa;
+  background: transparent;
 }

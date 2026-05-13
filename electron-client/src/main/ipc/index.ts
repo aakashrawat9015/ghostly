@@ -1,5 +1,6 @@
 import { registerAudioIpc } from "./audio.ipc"
 import { registerPipelineIpc } from "./pipeline.ipc"
+import { registerWindowIpc } from "./window.ipc"
 import { PipelineCoordinator } from "../coordinators/PipelineCoordinator"
 import { BrowserWindow } from "electron"
 
@@ -11,4 +12,5 @@ export function registerIpc(deps: {
 }) {
     registerAudioIpc({ ...deps, state })
     registerPipelineIpc({ coordinator: deps.coordinator, overlayWindow: deps.overlayWindow, state })
+    registerWindowIpc({ overlayWindow: deps.overlayWindow })
 }

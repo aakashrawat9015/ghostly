@@ -98,4 +98,8 @@ contextBridge.exposeInMainWorld("api", {
 
     setSTTMode: (mode: any): Promise<Reply> =>
         ipcRenderer.invoke("audio:mode:set", mode),
+
+    setOverlayOpacity: (opacity: number) => {
+        ipcRenderer.send("overlay:opacity:set", opacity)
+    },
 })

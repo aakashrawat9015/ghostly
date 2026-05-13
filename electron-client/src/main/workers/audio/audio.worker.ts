@@ -3,8 +3,8 @@ import { parentPort } from "worker_threads"
 import { DeepgramService, STTMode } from "../../services/stt/DeepgramService"
 import { GroqService } from "../../services/llm/GroqService"
 import { MeetingAssistant } from "../../services/llm/MeetingAssistant"
-import { TranscriptionCorrectionService } from "../../services/stt/TranscriptionCorrectionService"
-import { KeywordExtractor } from "../../services/stt/KeywordExtractor"
+import { CorrectionAgent } from "../../services/llm/CorrectionAgent"
+import { ProjectIndexer } from "../../utils/ProjectIndexer"
 import { cleanTranscript, isMeaningful, prepareForProcessing } from "../../utils/transcript"
 
 const DEBUG_AUDIO = process.env.DEBUG_AUDIO === "true"
@@ -27,8 +27,8 @@ let started    = false
 let dg: DeepgramService | null = null
 let assistant: MeetingAssistant | null = null
 let groq: GroqService | null = null
-let correctionService: TranscriptionCorrectionService | null = null
-let keywordExtractor: KeywordExtractor | null = null
+let correctionAgent: CorrectionAgent | null = null
+let projectIndexer: ProjectIndexer | null = null
 let activeFilePath = ""
 
 let lastUpdate  = Date.now()
@@ -90,8 +90,9 @@ function startAssistant() {
     if (!key) throw new Error("Missing GROQ_API_KEY")
     groq = new GroqService(key)
     assistant = new MeetingAssistant(groq, { enableRefinement: false })
-    correctionService = new TranscriptionCorrectionService(key)
-    keywordExtractor  = new KeywordExtractor()
+    // ProjectIndexer is created here; symbols are populated via set-project-symbols message
+    projectIndexer = new ProjectIndexer()
+    correctionAgent = new CorrectionAgent(projectIndexer)
 }
 
 /**
@@ -249,9 +250,8 @@ function startDeepgram(mode: STTMode = "general") {
             setTimeout(tryLLM, DEBOUNCE_MS)
 
             // Async correction — non-blocking
-            if (correctionService && keywordExtractor) {
-                const { keywords } = keywordExtractor.extract(activeFilePath)
-                correctionService.correctTranscript(cleaned, activeFilePath, keywords)
+            if (correctionAgent) {
+                correctionAgent.correct(cleaned, activeFilePath)
                     .then(({ corrected, latencyMs, usedFallback }) => {
                         if (!usedFallback && corrected !== cleaned) {
                             if (DEBUG_LLM) console.log(`[Correction] ${latencyMs}ms | "${cleaned}" → "${corrected}"`)
@@ -374,6 +374,16 @@ parentPort?.on("message", async (msg) => {
         return
     }
 
+    if (msg.type === "set-project-symbols") {
+        // Main process sends the full symbol list after indexing completes.
+        // We inject it into the worker's ProjectIndexer via a lightweight method.
+        if (projectIndexer && Array.isArray(msg.payload)) {
+            projectIndexer.injectSymbols(msg.payload as string[])
+            if (DEBUG_LLM) console.log(`[Worker] 📦 Received ${msg.payload.length} project symbols`)
+        }
+        return
+    }
+
     if (msg.type === "set-mode") {
         console.log(`[Worker] 🔄 Mode: ${msg.mode}`)
         if (started) {
@@ -406,7 +416,7 @@ parentPort?.on("message", async (msg) => {
         await stopDeepgram()
         stopTimers()
         resetSessionState()
-        assistant = correctionService = keywordExtractor = null
+        assistant = correctionAgent = projectIndexer = null
         activeFilePath = ""
         console.log("[Worker] ⏹️ Stopped")
     }

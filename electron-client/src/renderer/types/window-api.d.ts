@@ -41,6 +41,7 @@ declare global {
             setOverlayInteractive: (interactive: boolean) => Promise<Reply>
             resizeOverlay: (height: number) => void
             setSTTMode: (mode: STTMode) => Promise<Reply>
+            setOverlayOpacity: (opacity: number) => void
         }
     }
 }

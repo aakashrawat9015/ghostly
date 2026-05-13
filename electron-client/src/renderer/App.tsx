@@ -23,11 +23,7 @@ export default function App() {
 
   return (
     <div
-      className={
-        isOverlay
-          ? "w-screen h-screen bg-transparent"
-          : "w-screen h-screen bg-white"
-      }
+      className="w-screen h-screen bg-transparent"
     >
       {isOverlay ? <Overlay /> : <MainWindow />}
     </div>

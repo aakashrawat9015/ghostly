@@ -16,6 +16,7 @@
     "@tailwindcss/vite": "^4.2.4",
     "dotenv": "^17.4.2",
     "electron": "^41.3.0",
+    "glob": "11.0.0",
     "groq-sdk": "^1.1.2",
     "mic": "^2.1.2",
     "react": "^19.2.5",
