@@ -1,6 +1,5 @@
-// location renderer/components/Overlay.tsx
 import { useEffect, useState, useRef, useCallback, useMemo, memo } from "react"
-import type { AIResult, IntentType, STTMode } from "../types/window-api"
+import type { AIResult, IntentType } from "../types/window-api"
 
 type OverlayStatus = "listening" | "transcribing" | "understanding" | "suggesting" | "answering"
 
@@ -20,24 +19,20 @@ const STATUS_CFG = {
     answering: { dot: "bg-emerald-400", label: "Answering", color: "text-emerald-400" },
 } as const
 
-// ── Styles injected once ──────────────────────────────────────
-const styleEl = document.createElement("style")
-styleEl.textContent = `
+// ── Styles handled via a single-instance check ────────────────────────
+const styles = `
   @keyframes pulse-dot {
     0%,80%,100% { opacity:.2; transform:scale(.7); }
     40%         { opacity:1;  transform:scale(1);  }
   }
-  /* Container slides down from top */
   @keyframes ov-enter {
     from { opacity:0; transform:translateY(-8px) scale(.98); }
     to   { opacity:1; transform:translateY(0)    scale(1);   }
   }
-  /* Each new text chunk fades up */
   @keyframes chunk-in {
     from { opacity:0; transform:translateY(3px); }
     to   { opacity:1; transform:translateY(0);   }
   }
-  /* Skeleton shimmer */
   @keyframes shimmer {
     0%   { background-position: -400px 0; }
     100% { background-position:  400px 0; }
@@ -45,19 +40,13 @@ styleEl.textContent = `
   .ov-enter  { animation: ov-enter .18s cubic-bezier(.22,1,.36,1) forwards; }
   .chunk-in  { animation: chunk-in .12s ease forwards; }
   .shimmer   {
-    background: linear-gradient(90deg,
-      rgba(255,255,255,.04) 25%,
-      rgba(255,255,255,.10) 50%,
-      rgba(255,255,255,.04) 75%);
+    background: linear-gradient(90deg, rgba(255,255,255,.04) 25%, rgba(255,255,255,.10) 50%, rgba(255,255,255,.04) 75%);
     background-size: 400px 100%;
     animation: shimmer 1.4s infinite linear;
   }
-  .drag-region { -webkit-app-region: drag; }
-  .no-drag     { -webkit-app-region: no-drag; }
-`
-document.head.appendChild(styleEl)
+`;
 
-// ── Thinking dots ─────────────────────────────────────────────
+// ── Sub-components ──────────────────────────────────────────────────
 const ThinkingDots = memo(() => (
     <span className="inline-flex items-center gap-[3px] ml-1">
         {[0, 1, 2].map(i => (
@@ -67,7 +56,6 @@ const ThinkingDots = memo(() => (
     </span>
 ))
 
-// ── Skeleton placeholder — shown while Groq is thinking ──────
 const ThinkingSkeleton = memo(() => (
     <div className="px-4 py-3 space-y-2">
         <div className="shimmer h-[13px] rounded-full w-[85%]" />
@@ -76,30 +64,20 @@ const ThinkingSkeleton = memo(() => (
     </div>
 ))
 
-// ── Blinking cursor shown at end of streaming text ───────────
 const StreamCursor = memo(() => (
     <span className="inline-block w-[2px] h-[13px] bg-emerald-400 ml-0.5 align-middle rounded-full"
         style={{ animation: "pulse-dot .7s ease-in-out infinite" }} />
 ))
 
-// ── Typewriter text — renders bullet lines with staggered fade-in ──
-// Each line slides in sequentially so bullets appear one by one.
 const TypewriterText = memo(({ text, isStreaming }: { text: string; isStreaming: boolean }) => {
-    const lines = useMemo(() => {
-        return text
-            .split("\n")
-            .map(l => l.trim())
-            .filter(l => l.length > 0)
-    }, [text])
+    const lines = useMemo(() => text.split("\n").map(l => l.trim()).filter(l => l.length > 0), [text])
 
-    // Single line (no bullets) — animate word by word
     if (lines.length <= 1) {
         const words = text.trim().match(/\S+\s*/g) ?? []
         return (
             <p className="text-[13.5px] text-white/85 leading-[1.75] whitespace-pre-wrap">
                 {words.map((word, i) => (
-                    <span key={i} className="chunk-in inline"
-                        style={{ animationDelay: `${Math.min(i * 8, 80)}ms` }}>
+                    <span key={i} className="chunk-in inline" style={{ animationDelay: `${Math.min(i * 8, 80)}ms` }}>
                         {word}
                     </span>
                 ))}
@@ -108,21 +86,16 @@ const TypewriterText = memo(({ text, isStreaming }: { text: string; isStreaming:
         )
     }
 
-    // Multiple lines — animate each line in sequentially
     return (
         <div className="space-y-[6px]">
             {lines.map((line, i) => {
                 const isBullet = /^[•\-\*]/.test(line)
                 const content = isBullet ? line.slice(1).trim() : line
                 return (
-                    <div key={i} className="chunk-in flex items-start gap-2"
-                        style={{ animationDelay: `${i * 60}ms` }}>
-                        {isBullet && (
-                            <span className="mt-[3px] flex-shrink-0 w-[5px] h-[5px] rounded-full bg-emerald-400/70" />
-                        )}
+                    <div key={i} className="chunk-in flex items-start gap-2" style={{ animationDelay: `${i * 60}ms` }}>
+                        {isBullet && <span className="mt-[3px] flex-shrink-0 w-[5px] h-[5px] rounded-full bg-emerald-400/70" />}
                         <span className="text-[13.5px] text-white/85 leading-[1.7]">
                             {content}
-                            {/* Show cursor on the last line while streaming */}
                             {isStreaming && i === lines.length - 1 && <StreamCursor />}
                         </span>
                     </div>
@@ -132,33 +105,6 @@ const TypewriterText = memo(({ text, isStreaming }: { text: string; isStreaming:
     )
 })
 
-// ── Syntax highlight ──────────────────────────────────────────
-function useHighlight(text: string, active: boolean) {
-    return useMemo(() => {
-        if (!active) return null
-        return text.split("\n").map((line, i) => {
-            if (/^\s*(#|\/\/)/.test(line))
-                return <div key={i} className="text-slate-500 font-mono">{line}</div>
-            if (/\b(def |class |return |import |from |if |else|for |while |const |let |var |function )\b/.test(line)) {
-                const parts = line.split(/(\b(?:def|class|return|import|from|if|else|for|while|const|let|var|function)\b)/)
-                return (
-                    <div key={i} className="font-mono">
-                        {parts.map((p, j) =>
-                            /^(def|class|return|import|from|if|else|for|while|const|let|var|function)$/.test(p)
-                                ? <span key={j} className="text-violet-400">{p}</span>
-                                : <span key={j} className="text-slate-200">{p}</span>
-                        )}
-                    </div>
-                )
-            }
-            if (/["'`]/.test(line))
-                return <div key={i} className="font-mono text-amber-300">{line}</div>
-            return <div key={i} className="font-mono text-slate-200">{line}</div>
-        })
-    }, [text, active])
-}
-
-// ── Main component ────────────────────────────────────────────
 export default function Overlay() {
     const [result, setResult] = useState<AIResult | null>(null)
     const [streamingText, setStreaming] = useState("")
@@ -167,20 +113,21 @@ export default function Overlay() {
     const [lastFinals, setLastFinals] = useState<string[]>([])
     const [status, setStatus] = useState<OverlayStatus>("listening")
     const [visible, setVisible] = useState(true)
-    const [copied, setCopied] = useState(false)
-    const [codeMode, setCodeMode] = useState(false)
-    const [activeMode, setActiveMode] = useState<STTMode>("general")
-
-    // Key that changes when a new answer starts — forces TypewriterText to remount
-    // so word animations restart cleanly for each new answer
     const [answerKey, setAnswerKey] = useState(0)
 
     const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const lastAnswerRef = useRef("")
     const containerRef = useRef<HTMLDivElement>(null)
 
-    // ── Auto-resize window ────────────────────────────────────
     useEffect(() => {
+        // Prevent multiple style injections
+        if (!document.getElementById("overlay-styles")) {
+            const styleEl = document.createElement("style")
+            styleEl.id = "overlay-styles"
+            styleEl.textContent = styles
+            document.head.appendChild(styleEl)
+        }
+
         const el = containerRef.current
         if (!el) return
         const ro = new ResizeObserver((entries) => {
@@ -191,7 +138,6 @@ export default function Overlay() {
         return () => ro.disconnect()
     }, [])
 
-    // ── Derived ───────────────────────────────────────────────
     const displayText = result?.text ?? streamingText
     const hasAnswer = !!displayText
     const isStreaming = !result && !!streamingText
@@ -199,9 +145,6 @@ export default function Overlay() {
     const hasSummary = !hasAnswer && !!summary
     const hasTranscript = lastFinals.length > 0 || !!partial
 
-    const highlighted = useHighlight(displayText, codeMode && hasAnswer)
-
-    // ── Handlers ─────────────────────────────────────────────
     const resetState = useCallback(() => {
         setResult(null)
         setStreaming("")
@@ -212,25 +155,11 @@ export default function Overlay() {
         lastAnswerRef.current = ""
     }, [])
 
-    const changeMode = useCallback(async (mode: STTMode) => {
-        setActiveMode(mode)
-        await window.api.setSTTMode(mode)
-    }, [])
-
-    const copyAnswer = useCallback(async () => {
-        if (!displayText) return
-        await navigator.clipboard.writeText(displayText)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 1500)
-    }, [displayText])
-
-    // ── IPC ───────────────────────────────────────────────────
     useEffect(() => {
         const offIntent = window.api.onAIIntent((intent) => {
             setStatus(INTENT_TO_STATUS[intent] ?? "understanding")
             setResult(null)
             setStreaming("")
-            // Bump key so next answer animates fresh
             setAnswerKey(k => k + 1)
         })
 
@@ -290,13 +219,11 @@ export default function Overlay() {
     if (!visible) return null
 
     return (
-        <div className="fixed inset-0 flex flex-col items-center bg-transparent"
-            style={{ zIndex: 9999, pointerEvents: "none" }}>
+        <div className="flex flex-col items-center h-screen bg-transparent" style={{ pointerEvents: "none" }}>
             <div className="w-[620px] ov-enter" style={{ pointerEvents: "auto" }}>
                 <div ref={containerRef}
                     className="backdrop-blur-[14px] bg-[#0a0a0f]/75 border border-white/[0.08] rounded-[24px] shadow-[0_8px_40px_rgba(0,0,0,0.6)] overflow-hidden">
 
-                    {/* ── STATUS INDICATOR ── */}
                     <div className="flex items-center gap-2 px-5 py-2.5 bg-white/[0.02] border-b border-white/[0.04]">
                         <div className={`w-[6px] h-[6px] rounded-full ${cfg.dot}`} />
                         <span className={`text-[10px] font-bold tracking-widest uppercase ${cfg.color}`}>
@@ -305,17 +232,11 @@ export default function Overlay() {
                         </span>
                     </div>
 
-                    {/* ── THINKING SKELETON — appears immediately on intent ── */}
                     {isThinking && <ThinkingSkeleton />}
 
-                    {/* ── ANSWER ───────────────────────────────────── */}
                     {hasAnswer && (
                         <div key={answerKey} className="px-5 py-4">
-                            <TypewriterText
-                                key={answerKey}
-                                text={displayText}
-                                isStreaming={isStreaming}
-                            />
+                            <TypewriterText text={displayText} isStreaming={isStreaming} />
                             {result?.intent && (
                                 <div className="flex items-center gap-2 mt-4 pt-3 border-t border-white/[0.03]">
                                     <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-white/[0.05] text-white/30 border border-white/[0.06] uppercase tracking-tighter">
@@ -331,7 +252,6 @@ export default function Overlay() {
                         </div>
                     )}
 
-                    {/* ── SUMMARY ──────────────────────────────────── */}
                     {hasSummary && (
                         <div className="px-5 py-4" key={`summary-${answerKey}`}>
                             <div className="flex items-center gap-2 mb-2">
@@ -344,7 +264,6 @@ export default function Overlay() {
                         </div>
                     )}
 
-                    {/* ── TRANSCRIPT STRIP ─────────────────────────── */}
                     {hasTranscript && (
                         <div className="px-5 py-3 border-t border-white/[0.05] bg-white/[0.01]">
                             <p className="text-[11px] text-white/30 leading-relaxed font-medium italic">
@@ -354,7 +273,6 @@ export default function Overlay() {
                         </div>
                     )}
 
-                    {/* ── IDLE ─────────────────────────────────────── */}
                     {!hasAnswer && !isThinking && !hasSummary && !hasTranscript && (
                         <div className="flex items-center justify-center py-6 opacity-20">
                             <div className="flex items-center gap-3">
