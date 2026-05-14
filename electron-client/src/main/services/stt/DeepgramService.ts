@@ -71,8 +71,8 @@ export class DeepgramService {
             punctuate: "true",
             smart_format: "true",  // was true — adds server-side post-processing latency
             vad_events: "true",
-            endpointing: "500",
-            utterance_end_ms: "1000",
+            endpointing: "800",  // Increased from 500 to 800ms for better utterance detection
+            utterance_end_ms: "1500",  // Increased from 1000 to 1500ms to prevent cutting off mid-sentence
             profanity_filter: "false",
             diarize: "false",
         })
