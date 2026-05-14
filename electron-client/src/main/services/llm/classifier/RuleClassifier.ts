@@ -1,5 +1,5 @@
 // RuleClassifier.ts
-import type { ClassificationResult, InputType, IntentType, ConversationContext } from "./types"
+import type { ClassificationResult, InputType, IntentType } from "./types"
 
 const DEBUG = process.env.DEBUG_LLM === "true"
 
@@ -19,39 +19,16 @@ const SOCIAL_PATTERNS = [
     /^(congrats|congratulations|well done|good job|great job)\b/i,
     /^(sorry|excuse me|pardon)[,.\s]/i,
     /^(thanks|thank you|cheers|appreciate)\b/i,
-    /^hello\??\\.?$/i,
-    /^(hi|hey)\??\\.?$/i,
+    /^hello\??\.?$/i,
+    /^(hi|hey)\??\.?$/i,
     /^(i'm doing|i am doing|doing well|doing good|doing fine)\b/i,
     /^(that's great|that's good|that's nice|that's awesome|that's cool|that sounds)\b/i,
     /^(oh nice|oh cool|oh great|oh wow|oh interesting)\b/i,
     /^(got it|i see|i understand|makes sense|fair enough|sounds good)\b/i,
 ]
 
-// ── CORRECTION / NEGATION PATTERNS ──
-// "No. I am saying what is MCP." / "No, I mean X" / "I said X not Y"
-const CORRECTION_PATTERNS = [
-    /^no[.,!\s]+(i('m| am) (saying|asking|talking about)|i (mean|meant|said))\b/i,
-    /^(i('m| am) (saying|asking)|i (mean|meant|said))\s+(what|how|why|who|which|where|when)\b/i,
-    /^(not|no)[.,!\s]+.{3,}(i('m| am) (saying|asking)|i (mean|meant))\b/i,
-    /^(what i (mean|said|asked)|i was asking)\b/i,
-    /^no[.,!\s]+(it's|it is|that's|that is)\s+/i,
-    /^no[.,!\s]+(i('m| am) asking about|tell me about|what about)\b/i,
-    /^(i('m| am) not asking about|i didn't (ask|mean|say))\b/i,
-]
-
-// ── DEFINITION STATEMENT PATTERNS ──
-// "MCP means model context protocol" / "X stands for Y"
-const DEFINITION_PATTERNS = [
-    /\b\w+\s+(means|stands for|refers to|is short for|is called|is basically|is essentially)\s+/i,
-    /\b(it means|that means|which means|meaning)\s+/i,
-    /\b(also known as|aka|i\.e\.|i\.e)\b/i,
-]
-
-// How long after a response to consider inputs as potential follow-ups
-const POST_ANSWER_WINDOW_MS = 30_000  // 30 seconds
-
 export class RuleClassifier {
-    classify(text: string, context?: ConversationContext): ClassificationResult | null {
+    classify(text: string): ClassificationResult | null {
         const t = text.trim().toLowerCase()
 
         // ── GATE 1: Conversational prefix ────────────────────
@@ -67,23 +44,13 @@ export class RuleClassifier {
         }
 
         // ═══════════════════════════════════════════════════════
-        // PRIORITY 0: CORRECTIONS / NEGATIONS (before question signals)
-        // "No. I am saying what is MCP." → followup question
-        // ═══════════════════════════════════════════════════════
-
-        if (CORRECTION_PATTERNS.some(p => p.test(t))) {
-            if (DEBUG) console.log(`[RuleClassifier] 🔄 Correction detected: "${text}"`)
-            return this.result("followup", "question", 0.9, true, "correction/negation")
-        }
-
-        // ═══════════════════════════════════════════════════════
         // PRIORITY 1: EXPLICIT QUESTION SIGNALS
         // ═══════════════════════════════════════════════════════
 
         if (t.includes("?")) {
             // Rhetorical tags: "Right?", "OK?", "Yeah?"
-            const rhetoricalTag = /^(right|ok|okay|yeah|correct|got it|sure|alright|no|yes|huh|really|seriously|true|fair enough|makes sense|you know|isn't it|doesn't it|don't you think|wouldn't you say|know what i mean)\??\\.?$/i
-            const trailingTag = /[,.]\s*(right|ok|okay|yeah|correct|huh|no|yes|isn't it|doesn't it|you know)\s*\?\\.?$/i
+            const rhetoricalTag = /^(right|ok|okay|yeah|correct|got it|sure|alright|no|yes|huh|really|seriously|true|fair enough|makes sense|you know|isn't it|doesn't it|don't you think|wouldn't you say|know what i mean)\??\.?$/i
+            const trailingTag = /[,.]\s*(right|ok|okay|yeah|correct|huh|no|yes|isn't it|doesn't it|you know)\s*\?\.?$/i
 
             if (rhetoricalTag.test(t.replace(/[^a-z0-9\s?]/gi, "").trim())) {
                 return this.result("ignore", "none", 0.9, false, "rhetorical tag")
@@ -132,16 +99,6 @@ export class RuleClassifier {
         // "definition of X" / "meaning of X"
         if (/\b(definition of|meaning of)\b/i.test(t)) {
             return this.result("new", "question", 0.92, true, "definition phrase")
-        }
-
-        // ═══════════════════════════════════════════════════════
-        // DEFINITION STATEMENTS — "X means Y" / "X stands for Y"
-        // These are often corrections or clarifications
-        // ═══════════════════════════════════════════════════════
-
-        if (DEFINITION_PATTERNS.some(p => p.test(t))) {
-            if (DEBUG) console.log(`[RuleClassifier] 📖 Definition statement: "${text}"`)
-            return this.result("followup", "question", 0.85, true, "definition statement")
         }
 
         // ═══════════════════════════════════════════════════════
@@ -206,37 +163,6 @@ export class RuleClassifier {
         ]
         if (decisionPatterns.some(p => p.test(t))) {
             return this.result("new", "decision", 0.75, true, "decision")
-        }
-
-        // ═══════════════════════════════════════════════════════
-        // POST-ANSWER CONTINUATION DETECTION
-        // If we answered recently and the input has meaningful content,
-        // treat it as a follow-up instead of ignoring
-        // ═══════════════════════════════════════════════════════
-
-        if (context?.lastAnswerTime) {
-            const timeSinceAnswer = Date.now() - context.lastAnswerTime
-            if (timeSinceAnswer < POST_ANSWER_WINDOW_MS && context.lastAnswer) {
-                // Check if input shares topic words with the last Q&A
-                const inputWords = new Set(t.split(/\s+/).filter(w => w.length > 2))
-                const lastQWords = new Set((context.lastQuestion || "").toLowerCase().split(/\s+/).filter(w => w.length > 2))
-                const lastAWords = new Set((context.lastAnswer || "").toLowerCase().split(/\s+/).filter(w => w.length > 2))
-
-                const hasTopicOverlap = [...inputWords].some(w => lastQWords.has(w) || lastAWords.has(w))
-                const hasSubstance = inputWords.size >= 2
-
-                if (hasTopicOverlap && hasSubstance) {
-                    if (DEBUG) console.log(`[RuleClassifier] 🔗 Post-answer continuation (${Math.floor(timeSinceAnswer / 1000)}s ago): "${text}"`)
-                    return this.result("followup", "question", 0.8, true, "post-answer continuation")
-                }
-
-                // Even without topic overlap, if input has question-like words, treat as followup
-                const hasQuestionIntent = /\b(what|why|how|when|where|who|which|explain|tell|describe|same|different|both|compare)\b/i.test(t)
-                if (hasQuestionIntent && hasSubstance) {
-                    if (DEBUG) console.log(`[RuleClassifier] 🔗 Post-answer question-like (${Math.floor(timeSinceAnswer / 1000)}s ago): "${text}"`)
-                    return this.result("followup", "question", 0.75, true, "post-answer question-like")
-                }
-            }
         }
 
         // ═══════════════════════════════════════════════════════

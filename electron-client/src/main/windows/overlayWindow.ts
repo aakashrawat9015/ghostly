@@ -2,7 +2,7 @@ import { BrowserWindow, screen, ipcMain } from "electron"
 import path from "path"
 
 const WIN_WIDTH = 700
-const WIN_MIN_HEIGHT = 1
+const WIN_MIN_HEIGHT = 1 
 const WIN_MAX_HEIGHT = 600
 
 export function createOverlayWindow(isDev: boolean): BrowserWindow {
@@ -43,19 +43,19 @@ export function createOverlayWindow(isDev: boolean): BrowserWindow {
         if (isReady) win.showInactive()
         else win.once("ready-to-show", () => { if (!win.isDestroyed()) win.showInactive() })
     }
-    ; (win as any).safeShow = safeShow
+    ;(win as any).safeShow = safeShow
 
     win.setIgnoreMouseEvents(true, { forward: true })
     win.setAlwaysOnTop(true, "screen-saver")
-    // win.setContentProtection(true)
+    win.setContentProtection(true)
 
     // ✅ FIX: Change setBounds to setSize to avoid resetting position
     ipcMain.on("overlay:resize", (_evt, contentHeight: number) => {
         if (win.isDestroyed()) return
         const clamped = Math.max(WIN_MIN_HEIGHT, Math.min(Math.ceil(contentHeight), WIN_MAX_HEIGHT))
-
+        
         const [currentW] = win.getSize()
-        win.setSize(currentW, clamped, true)
+        win.setSize(currentW, clamped, true) 
     })
 
     if (isDev) {

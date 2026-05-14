@@ -66,7 +66,7 @@ export class InputClassifier {
         // ⚡ FAST PATH: Rule-based classification
         // ═══════════════════════════════════════════════════════
 
-        const ruleResult = this.ruleClassifier.classify(cleaned, context)
+        const ruleResult = this.ruleClassifier.classify(cleaned)
 
         if (ruleResult) {
             // High confidence from rules → use it

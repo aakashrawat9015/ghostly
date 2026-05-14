@@ -12,16 +12,14 @@ const MIN_CONFIDENCE_PARTIAL = 0.7
 const MIN_AUDIO_CHUNK_SIZE = 1600  // 50ms @ 16kHz — was 3200 (100ms)
 
 // ✅ MASTER KEYWORD LIST - 20 words max, high impact wale
-// Prioritizing MCP and core technical terms
 const TECHNICAL_KEYWORDS = [
-    "MCP:20",                    // Highest boost for MCP to prevent MCT/MCZ confusion
-    "Model Context Protocol:15", // Full phrase boost
-    "ChatGPT:12", "Claude:12", "Groq:12",
-    "JavaScript:10", "TypeScript:10", "React:10", "Node.js:10",
-    "async:10", "await:10", "Promise:10",
-    "API:8", "WebSocket:8", "JSON:8",
-    "LLM:10", "RAG:10", "embeddings:10",
-    "vector database:10", "fine-tuning:10"
+    "ChatGPT:10", "Claude:10", "Groq:10", "MCP:10", "Model Context Protocol:10",
+    "JavaScript:10", "TypeScript:10", "React:10", "Electron:10", "Node.js:8",
+    "async:10", "await:10", "Promise:10", "callback:8", "API:8",
+    "single-threaded:10", "multithreaded:10", "event loop:10", "WebSocket:8", "JSON:8",
+    // ✅ AI/ML terms that Deepgram commonly mishears
+    "RAG:10", "Retrieval-Augmented Generation:10", "LLM:10", "embeddings:10",
+    "vector database:10", "fine-tuning:10", "inference:8", "transformer:8",
 ]
 
 const MEETING_KEYWORDS = [

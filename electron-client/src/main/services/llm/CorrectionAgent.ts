@@ -29,11 +29,6 @@ STRICT RULES:
 6. If in doubt, leave the word unchanged — wrong corrections are worse than no correction
 7. Return ONLY the corrected text. No explanations, no quotes, no labels.`
 
-const DOMAIN_KEYWORDS = [
-    "MCP", "RAG", "LLM", "LCP", "Vite", "Next.js", "React", "TypeScript", "JavaScript",
-    "Node.js", "Groq", "Deepgram", "Anthropic", "Claude", "OpenAI"
-]
-
 export interface CorrectionResult {
     corrected: string
     latencyMs: number
@@ -62,24 +57,15 @@ export class CorrectionAgent {
     async correct(rawText: string, activeFilePath: string): Promise<CorrectionResult> {
         const start = Date.now()
 
-        if (!this.client) {
-            return { corrected: rawText, latencyMs: 0, usedFallback: true }
-        }
-
-        if (rawText.trim().length < 4) {
-            if (DEBUG) console.log(`[CorrectionAgent] ⏭️ Skipping: text too short ("${rawText}")`)
+        if (!this.client || rawText.trim().length < 4) {
             return { corrected: rawText, latencyMs: 0, usedFallback: true }
         }
 
         // Skip correction if no technical signals are present in the transcript.
         // This avoids the LLM substituting common English words with tech terms.
-        const signal = this.getTechnicalSignal(rawText)
-        if (!signal) {
-            if (DEBUG) console.log(`[CorrectionAgent] ⏭️ Skipping: no technical signal in "${rawText}"`)
+        if (!this.hasTechnicalSignal(rawText)) {
             return { corrected: rawText, latencyMs: 0, usedFallback: true }
         }
-
-        if (DEBUG) console.log(`[CorrectionAgent] 🔍 Processing: "${rawText}" (Signal: ${signal})`)
 
         try {
             const corrected = await Promise.race([
@@ -92,12 +78,10 @@ export class CorrectionAgent {
             // Safety: never drop a "?" that was in the original
             const safe = this.safetyCheck(rawText, corrected)
 
-            if (DEBUG) {
-                if (safe !== rawText) {
-                    console.log(`[CorrectionAgent] ✅ ${latencyMs}ms | "${rawText}" → "${safe}"`)
-                } else {
-                    console.log(`[CorrectionAgent] ⏸️ No change after ${latencyMs}ms`)
-                }
+            if (DEBUG && safe !== rawText) {
+                console.log(`[CorrectionAgent] ✅ ${latencyMs}ms`)
+                console.log(`  Raw:       "${rawText}"`)
+                console.log(`  Corrected: "${safe}"`)
             }
 
             return { corrected: safe, latencyMs, usedFallback: false }
@@ -176,48 +160,40 @@ export class CorrectionAgent {
     }
 
     /**
-     * Returns a description of the signal if the transcript suggests a technical mishearing.
+     * Returns true only if the transcript contains signals that suggest
+     * a technical mishearing actually occurred — spaced-out letters, known
+     * acronym patterns, or words that phonetically resemble indexed symbols.
+     *
+     * This prevents the LLM from substituting plain English words like
+     * "memory" or "creation" with technical terms just because they're in context.
      */
-    private getTechnicalSignal(text: string): string | null {
+    private hasTechnicalSignal(text: string): boolean {
         const t = text.toLowerCase()
 
-        // 1. Spaced-out acronym pattern: "m c p", "j s", "a p i", "t s"
-        if (/\b[a-z]\s[a-z](\s[a-z])*\b/.test(t)) return "spaced-out acronym"
+        // Spaced-out acronym pattern: "m c p", "j s", "a p i", "t s"
+        if (/\b[a-z]\s[a-z](\s[a-z])*\b/.test(t)) return true
 
-        // 2. Phonetic tech patterns
-        if (/\b(jay\s*es|type\s*script|next\s*jay|react\s*jay|node\s*jay|vue\s*jay)\b/i.test(t)) return "phonetic match"
+        // Phonetic tech patterns: "next jay es", "react jay es", "type script"
+        if (/\b(jay\s*es|type\s*script|next\s*jay|react\s*jay|node\s*jay|vue\s*jay)\b/i.test(t)) return true
 
-        // 3. Partial word that sounds like a known acronym
-        if (/\b(em\s*see\s*pee|ay\s*pee\s*eye|dee\s*bee|ess\s*kew\s*el)\b/i.test(t)) return "acronym sound"
+        // Partial word that sounds like a known acronym
+        if (/\b(em\s*see\s*pee|ay\s*pee\s*eye|dee\s*bee|ess\s*kew\s*el)\b/i.test(t)) return true
 
-        // 4. Edit distance check against symbols AND domain keywords
+        // Contains a word that's very close to a known symbol (edit distance 1)
+        // Only check short words (≤5 chars) since those are most likely to be misheard acronyms
         const words = t.split(/\s+/)
         const symbols = this.indexer.getAllSymbolNames()
-        const allKeywords = [...new Set([...symbols, ...DOMAIN_KEYWORDS])]
-
         for (const word of words) {
-            if (word.length < 2 || word.length > 8) continue
-            
-            for (const key of allKeywords) {
-                const lowerKey = key.toLowerCase()
-                if (lowerKey.length < 2) continue
-
-                // Exact match (already technical)
-                if (word === lowerKey) return `exact match (${key})`
-
-                // Edit distance 1 for short words
-                // ONLY if the word is NOT a common English word (prevents map -> MCP)
-                if (word.length <= 4 && lowerKey.length <= 4) {
-                    if (this.editDistance(word, lowerKey) === 1) {
-                        const commonWords = ["map", "map", "cap", "tap", "gap", "nap", "rap", "sap", "yap"]
-                        if (commonWords.includes(word)) continue
-                        return `fuzzy match (${word} -> ${key})`
-                    }
+            if (word.length < 2 || word.length > 5) continue
+            for (const sym of symbols) {
+                if (sym.length < 2 || sym.length > 6) continue
+                if (this.editDistance(word, sym.toLowerCase()) <= 1 && word !== sym.toLowerCase()) {
+                    return true
                 }
             }
         }
 
-        return null
+        return false
     }
 
     /** Levenshtein edit distance */

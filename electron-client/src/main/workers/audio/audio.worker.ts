@@ -46,12 +46,6 @@ let hasNewFinal      = false
 let earlyTriggerText = ""
 let earlyTriggerAt   = 0
 
-// Fragment buffering — hold short incomplete finals and merge with next
-let pendingFragment   = ""
-let pendingFragmentAt = 0
-let fragmentTimer: NodeJS.Timeout | null = null
-const FRAGMENT_MERGE_MS = 1500  // max wait for next fragment
-
 let q: Buffer[] = []
 let qBytes = 0
 let lastAudioAt = 0
@@ -79,9 +73,6 @@ function resetSessionState() {
     hasNewFinal       = false
     earlyTriggerText  = ""
     earlyTriggerAt    = 0
-    pendingFragment   = ""
-    pendingFragmentAt = 0
-    if (fragmentTimer) { clearTimeout(fragmentTimer); fragmentTimer = null }
 
     q      = []
     qBytes = 0
@@ -117,28 +108,6 @@ function looksLikeCompleteQuestion(text: string): boolean {
     if (/^(hey|hi|hello|how are|how have|how's|what's up)\b/.test(lower)) return false
     if (/^(right|ok|okay|yeah|correct|huh|really)\?$/.test(lower)) return false
     return true
-}
-
-/**
- * Returns true if the text looks like an incomplete fragment that should
- * be merged with the next final rather than classified alone.
- * e.g. "So can you", "and also", "but what about"
- */
-function looksLikeFragment(text: string): boolean {
-    const t = text.trim()
-    const words = t.split(/\s+/)
-    // Too short to be a complete thought (< 5 words, no question mark, no period)
-    if (words.length < 5 && !t.endsWith("?") && !t.endsWith(".")) {
-        // Ends with a connective or incomplete verb phrase
-        if (/\b(can|could|would|will|shall|should|do|does|did|is|are|was|were|and|but|or|so|also|about|the|a|an|to|for|in|of|with)$/i.test(t)) {
-            return true
-        }
-        // Starts with a conjunction
-        if (/^(and|but|or|so|also|then|yet|nor)\b/i.test(t)) {
-            return true
-        }
-    }
-    return false
 }
 
 /** Jaccard word-overlap similarity (0–1) */
@@ -251,35 +220,6 @@ async function trySummary() {
     }
 }
 
-// ── Process a complete final transcript ───────────────────────
-
-function processFinal(cleaned: string) {
-    lastFinal   = cleaned
-    lastPartial = ""
-    lastUpdate  = Date.now()
-
-    assistant?.addFinalTranscript(cleaned)
-    summaryBuffer.push(cleaned)
-    hasNewFinal = true
-
-    parentPort?.postMessage({ type: "transcript-final", payload: cleaned })
-    setTimeout(tryLLM, DEBOUNCE_MS)
-
-    // Async correction — non-blocking
-    if (correctionAgent) {
-        correctionAgent.correct(cleaned, activeFilePath)
-            .then(({ corrected, latencyMs, usedFallback }) => {
-                if (!usedFallback && corrected !== cleaned) {
-                    if (DEBUG_LLM) console.log(`[Correction] ${latencyMs}ms | "${cleaned}" → "${corrected}"`)
-                    lastFinal = corrected
-                    assistant?.addFinalTranscript(corrected)
-                    parentPort?.postMessage({ type: "transcript-final-corrected", payload: corrected })
-                }
-            })
-            .catch(e => { if (DEBUG_LLM) console.error("[Correction] Error:", e?.message) })
-    }
-}
-
 // ── Deepgram ──────────────────────────────────────────────────
 
 function startDeepgram(mode: STTMode = "general") {
@@ -296,42 +236,32 @@ function startDeepgram(mode: STTMode = "general") {
         if (isFinal) {
             if (cleaned === lastFinal) return
 
+            lastFinal   = cleaned
+            lastPartial = ""
+            lastUpdate  = Date.now()
+
+            assistant?.addFinalTranscript(cleaned)
+            summaryBuffer.push(cleaned)
+            hasNewFinal = true
+
             if (DEBUG_LLM) console.log(`[STT FINAL] ${cleaned}`)
 
-            // ── FRAGMENT BUFFERING ────────────────────────────
-            // If there's a pending fragment, merge it with this final
-            if (pendingFragment) {
-                const merged = pendingFragment + " " + cleaned
-                if (fragmentTimer) { clearTimeout(fragmentTimer); fragmentTimer = null }
-                if (DEBUG_LLM) console.log(`[Worker] 🔗 Fragment merged: "${pendingFragment}" + "${cleaned}" → "${merged}"`)
-                pendingFragment = ""
-                pendingFragmentAt = 0
-                // Process the merged text as the final
-                processFinal(merged)
-                return
-            }
+            parentPort?.postMessage({ type: "transcript-final", payload: cleaned })
+            setTimeout(tryLLM, DEBOUNCE_MS)
 
-            // If this final looks like an incomplete fragment, buffer it
-            if (looksLikeFragment(cleaned)) {
-                if (DEBUG_LLM) console.log(`[Worker] ⏳ Fragment buffered: "${cleaned}" (waiting ${FRAGMENT_MERGE_MS}ms for next)`)
-                pendingFragment = cleaned
-                pendingFragmentAt = Date.now()
-                // Set a timer: if no next final arrives, process the fragment alone
-                fragmentTimer = setTimeout(() => {
-                    if (pendingFragment) {
-                        if (DEBUG_LLM) console.log(`[Worker] ⏰ Fragment timeout, processing alone: "${pendingFragment}"`)
-                        const frag = pendingFragment
-                        pendingFragment = ""
-                        pendingFragmentAt = 0
-                        fragmentTimer = null
-                        processFinal(frag)
-                    }
-                }, FRAGMENT_MERGE_MS)
-                return
+            // Async correction — non-blocking
+            if (correctionAgent) {
+                correctionAgent.correct(cleaned, activeFilePath)
+                    .then(({ corrected, latencyMs, usedFallback }) => {
+                        if (!usedFallback && corrected !== cleaned) {
+                            if (DEBUG_LLM) console.log(`[Correction] ${latencyMs}ms | "${cleaned}" → "${corrected}"`)
+                            lastFinal = corrected
+                            assistant?.addFinalTranscript(corrected)
+                            parentPort?.postMessage({ type: "transcript-final-corrected", payload: corrected })
+                        }
+                    })
+                    .catch(e => { if (DEBUG_LLM) console.error("[Correction] Error:", e?.message) })
             }
-
-            // Normal final — process immediately
-            processFinal(cleaned)
             return
         }
 

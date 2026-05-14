@@ -8,7 +8,7 @@ const DEBUG = import.meta.env.VITE_DEBUG === "true"
 export default function MainWindow() {
     const [status, setStatus] = useState<RecordingStatus>("idle")
     const [loading, setLoading] = useState(false)
-    const [opacity, setOpacity] = useState(0.95)
+    const [opacity, setOpacity] = useState(0.98)
     const [activeMode, setActiveMode] = useState<STTMode>("general")
 
     const log = (...args: any[]) => {
@@ -61,7 +61,7 @@ export default function MainWindow() {
             <div className="flex items-center justify-between w-[620px] h-14 px-5 bg-[#0a0a0f]/75 backdrop-blur-[14px] border border-white/10 rounded-[28px] shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
 
                 {/* Drag Handle + Logo */}
-                <div className="flex items-center gap-2 cursor-move -webkit-app-region-drag shrink-0">
+                <div className="flex items-center gap-3 cursor-move -webkit-app-region-drag shrink-0">
                     <div className="relative flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-br from-sky-400 to-violet-500 shadow-lg shadow-sky-500/20">
                         <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -113,8 +113,11 @@ export default function MainWindow() {
                     {/* Transparency Slider */}
                     <div className="flex items-center gap-3 group">
                         <svg className="w-4 h-4 text-white/30 group-hover:text-white/60 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.172-1.172a4 4 0 015.656 0l1.172 1.172a4 4 0 010 5.656l-1.172 1.172a4 4 0 01-5.656 0L11 11.657" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 12m-9 9a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 12c0-4.97 4.03-9 9-9" />
                         </svg>
+
+
                         <input
                             type="range"
                             min="0.25"
