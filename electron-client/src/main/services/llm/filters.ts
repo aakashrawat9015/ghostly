@@ -84,9 +84,9 @@ export function extractCoreQuestion(text: string): string {
     )
     if (commandMatch) return commandMatch[0].trim()
 
-    // 2. Standard WH questions
+    // 2. Standard WH questions (must start at beginning of text to avoid stripping subjects)
     const whMatch = cleaned.match(
-        /(what|how|why|when|where|who|which|can|could|do|does|is|are)\s+.+\??/i
+        /^(what|how|why|when|where|who|which|can|could|do|does|is|are)\s+.+\??/i
     )
     if (whMatch) return whMatch[0].trim()
 
