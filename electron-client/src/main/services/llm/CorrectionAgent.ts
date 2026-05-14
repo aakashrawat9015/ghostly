@@ -205,17 +205,13 @@ export class CorrectionAgent {
                 // Exact match (already technical)
                 if (word === lowerKey) return `exact match (${key})`
 
-                // Edit distance 1 for short words (acronyms like MCP vs MCT)
+                // Edit distance 1 for short words
+                // ONLY if the word is NOT a common English word (prevents map -> MCP)
                 if (word.length <= 4 && lowerKey.length <= 4) {
                     if (this.editDistance(word, lowerKey) === 1) {
+                        const commonWords = ["map", "map", "cap", "tap", "gap", "nap", "rap", "sap", "yap"]
+                        if (commonWords.includes(word)) continue
                         return `fuzzy match (${word} -> ${key})`
-                    }
-                }
-
-                // Substring/Contains match for longer keywords
-                if (word.length >= 4 && lowerKey.length >= 4) {
-                    if (word.includes(lowerKey) || lowerKey.includes(word)) {
-                        return `substring match (${word} ~ ${key})`
                     }
                 }
             }

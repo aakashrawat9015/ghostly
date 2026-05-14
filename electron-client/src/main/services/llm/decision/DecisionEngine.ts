@@ -32,8 +32,8 @@ export class DecisionEngine {
             return this.reject("Input type is ignore", 0.95)
         }
 
-        // 2. Very low confidence (allow down to 0.3 for questions)
-        const minConfidence = classification.intent === "question" ? 0.3 : 0.5
+        // 2. Minimum confidence required
+        const minConfidence = 0.5
 
         if (classification.confidence < minConfidence) {
             return this.reject(`Low confidence: ${classification.confidence}`, 0.8)

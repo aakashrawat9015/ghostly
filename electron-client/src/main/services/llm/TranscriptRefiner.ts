@@ -12,11 +12,7 @@ RULES:
 6. Return ONLY the refined text. No explanations.
 
 CONTEXT:
-The meeting involves topics like:
-- JavaScript, TypeScript, Node.js, React, Electron, Java, Python, PHP, C++.
-- AI models: ChatGPT, Claude, Groq.
-- Model Context Protocol (MCP).
-- Software architecture, async/await, event loops, promises, callbacks.`
+The meeting involves topics like software development, programming languages, web frameworks, AI models, protocols, and software architecture. Fix common technical misspellings based on context while preserving the original intent.`
 
 export class TranscriptRefiner {
     constructor(private groq: GroqService) { }

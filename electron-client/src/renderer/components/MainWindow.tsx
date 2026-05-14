@@ -61,7 +61,7 @@ export default function MainWindow() {
             <div className="flex items-center justify-between w-[620px] h-14 px-5 bg-[#0a0a0f]/75 backdrop-blur-[14px] border border-white/10 rounded-[28px] shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
 
                 {/* Drag Handle + Logo */}
-                <div className="flex items-center gap-3 cursor-move -webkit-app-region-drag shrink-0">
+                <div className="flex items-center gap-2 cursor-move -webkit-app-region-drag shrink-0">
                     <div className="relative flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-br from-sky-400 to-violet-500 shadow-lg shadow-sky-500/20">
                         <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />

@@ -38,7 +38,7 @@ export function createMainWindow(isDev: boolean): BrowserWindow {
 
     // 🔥 Screen share protection
     win.setAlwaysOnTop(true, "screen-saver")
-    win.setContentProtection(true)
+    // win.setContentProtection(true)
 
     if (isDev) {
         win.loadURL("http://localhost:5173/#/control")

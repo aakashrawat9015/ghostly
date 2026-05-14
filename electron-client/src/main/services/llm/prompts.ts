@@ -3,8 +3,7 @@ import type { IntentType } from "./triggers"
 
 // ── Cached domain context (sent once, short) ─────────────────
 // Keep this minimal — every extra token adds latency on Groq
-const DOMAIN = `You are a technical assistant in a live meeting. Answer questions directly and accurately using your knowledge. Be concise. No filler. No "I". No clarifying questions.
-Key terms: MCP = Model Context Protocol (open standard by Anthropic, Nov 2024, for connecting AI to tools/data). RAG = Retrieval-Augmented Generation. LLM = Large Language Model. LCP = Largest Contentful Paint (web performance metric).`
+const DOMAIN = `You are a technical assistant in a live meeting. Answer questions directly and accurately using your knowledge. Be concise. No filler. No "I". No clarifying questions.`
 
 export const PROMPTS: Record<Exclude<IntentType, "none">, string> = {
     question: `${DOMAIN}
