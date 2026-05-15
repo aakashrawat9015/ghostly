@@ -13,7 +13,7 @@ const MIN_AUDIO_CHUNK_SIZE = 1600  // 50ms @ 16kHz — was 3200 (100ms)
 
 // ✅ MASTER KEYWORD LIST - 20 words max, high impact wale
 const TECHNICAL_KEYWORDS = [
-    "ChatGPT:10", "Claude:10", "Groq:10", "MCP:10", "Model Context Protocol:10",
+    "ChatGPT:10", "Claude:10", "Groq:10", "MCP:10", "MCT:10", "Model Context Protocol:10",
     "JavaScript:10", "TypeScript:10", "React:10", "Electron:10", "Node.js:8",
     "async:10", "await:10", "Promise:10", "callback:8", "API:8",
     "single-threaded:10", "multithreaded:10", "event loop:10", "WebSocket:8", "JSON:8",
@@ -61,8 +61,12 @@ export class DeepgramService {
 
     private generateUrl(mode: STTMode): string {
         const baseUrl = "wss://api.deepgram.com/v1/listen"
+
+        // High priority keywords that should ALWAYS be present
+        const BASE_KEYWORDS = ["MCP:10", "MCT:10", "Groq:10", "LLM:10"]
+
         const params = new URLSearchParams({
-            model: "nova-2",
+            model: "nova-3",
             language: "en-US",
             encoding: "linear16",
             sample_rate: "16000",
@@ -79,7 +83,7 @@ export class DeepgramService {
 
         // ✅ Mode-specific config
         if (mode === "technical") {
-            params.set("prompt", "Technical software engineering and AI/ML discussion. RAG means Retrieval-Augmented Generation. LLM means Large Language Model. MCP means Model Context Protocol. Topics include JavaScript, TypeScript, React, Electron, Node.js, async await, promises, event loop, API, WebSocket, vector databases, embeddings, fine-tuning.")
+            params.set("prompt", "Technical software engineering and AI/ML discussion. Topics include JavaScript, TypeScript, React, Electron, Node.js, async await, promises, event loop, API, WebSocket, vector databases, embeddings, fine-tuning.")
 
             // Base keywords + dynamic keywords
             const allKeywords = [...TECHNICAL_KEYWORDS, ...this.dynamicKeywords]
@@ -94,6 +98,11 @@ export class DeepgramService {
                 params.append("keywords", kw)
             })
         }
+
+        // ✅ Add Base Keywords to ALL modes
+        BASE_KEYWORDS.forEach(kw => {
+            params.append("keywords", kw)
+        })
 
         return `${baseUrl}?${params.toString()}`
     }

@@ -117,8 +117,9 @@ export class CorrectionAgent {
             }
         }
 
-        // ── 3. Also include all known symbol names as a hint ──
-        const allSymbols = this.indexer.getAllSymbolNames().slice(0, 50).join(", ")
+        // ── 3. Also include all known symbol names + common global tech terms ──
+        const globalTechTerms = ["MCP", "MCT", "RAG", "LLM", "STT", "TTS", "VAD", "Groq", "Claude", "ChatGPT"]
+        const allSymbols = [...globalTechTerms, ...this.indexer.getAllSymbolNames()].slice(0, 60).join(", ")
 
         // ── 4. Build user prompt ──────────────────────────────
         const activeFileName = activeFilePath?.split(/[\\/]/).pop() ?? ""
