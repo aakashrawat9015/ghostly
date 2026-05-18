@@ -66,7 +66,7 @@ export class DeepgramService {
         const BASE_KEYWORDS = ["MCP:10", "MCT:10", "Groq:10", "LLM:10"]
 
         const params = new URLSearchParams({
-            model: "nova-3",
+            model: "nova-2",
             language: "en-US",
             encoding: "linear16",
             sample_rate: "16000",
