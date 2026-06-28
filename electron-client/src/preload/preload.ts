@@ -89,6 +89,12 @@ contextBridge.exposeInMainWorld("api", {
         return () => ipcRenderer.removeListener("ai:summary", handler)
     },
 
+    onAIError: (cb: (message: string) => void) => {
+        const handler = (_: unknown, message: string) => cb(message)
+        ipcRenderer.on("ai:error", handler)
+        return () => ipcRenderer.removeListener("ai:error", handler)
+    },
+
     setOverlayInteractive: (interactive: boolean): Promise<Reply> =>
         ipcRenderer.invoke("overlay:setInteractive", interactive),
 

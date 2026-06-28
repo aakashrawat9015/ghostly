@@ -9,7 +9,11 @@
     "start": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
     "dev:renderer": "vite",
     "dev:main": "wait-on http://localhost:5173 && concurrently \"tsc -p tsconfig.main.dev.json -w --preserveWatchOutput\" \"wait-on dist/main/main.js && electron .\"",
-    "build": "npm run clean && vite build && tsc -p tsconfig.main.json"
+    "build": "npm run clean && vite build && tsc -p tsconfig.main.json",
+    "native:install": "cd native && npm install",
+    "native:build": "cd native && npm run build",
+    "native:build:debug": "cd native && npm run build:debug",
+    "native:test": "cd native && npm run test"
   },
   "dependencies": {
     "@shiguredo/rnnoise-wasm": "^2025.1.5",
@@ -18,7 +22,6 @@
     "electron": "^41.3.0",
     "glob": "11.0.0",
     "groq-sdk": "^1.1.2",
-    "mic": "^2.1.2",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "tailwindcss": "^4.2.4",

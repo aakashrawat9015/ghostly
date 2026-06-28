@@ -4,8 +4,8 @@ import { Worker } from "worker_threads"
 import "dotenv/config"
 
 import { WorkerBridge } from "./workers/WorkerBridge"
-import { AudioService } from "./services/AudioService"
-import { MicService } from "./services/MicService"
+import { NativeAudioBackend } from "./services/audio/NativeAudioBackend"
+import { IAudioBackend } from "./services/audio/IAudioBackend"
 import { PipelineCoordinator } from "./coordinators/PipelineCoordinator"
 import { ProjectIndexer } from "./utils/ProjectIndexer"
 import { registerIpc } from "./ipc"
@@ -30,41 +30,45 @@ let coordinator: PipelineCoordinator | null = null
 // ── Window Sync Helpers ─────────────────────────────────────
 
 function syncOverlayPosition() {
-    if (!mainWindow || !overlayWindow || mainWindow.isDestroyed() || overlayWindow.isDestroyed()) return
+    if (
+        !mainWindow ||
+        !overlayWindow ||
+        mainWindow.isDestroyed() ||
+        overlayWindow.isDestroyed()
+    )
+        return
 
     const bounds = mainWindow.getBounds()
     const ovBounds = overlayWindow.getBounds()
-    
-    // Atomic update of position and width to prevent jitter
+
     overlayWindow.setBounds({
         x: bounds.x,
         y: bounds.y + bounds.height,
         width: bounds.width,
-        height: ovBounds.height
+        height: ovBounds.height,
     })
 }
 
 let syncInterval: NodeJS.Timeout | null = null
 function startSyncLoop() {
     if (syncInterval) return
-    syncInterval = setInterval(syncOverlayPosition, 16) // 60fps for smooth dragging
+    syncInterval = setInterval(syncOverlayPosition, 16)
 }
 function stopSyncLoop() {
     if (syncInterval) {
         clearInterval(syncInterval)
         syncInterval = null
     }
-    syncOverlayPosition() // Final snap to perfect position
+    syncOverlayPosition()
 }
 
-// ── Project indexer — Instance only (Method called in whenReady) ──
+// ── Project indexer ──
 const projectIndexer = new ProjectIndexer()
 
 app.whenReady().then(() => {
     mainWindow = createMainWindow(isDev)
     overlayWindow = createOverlayWindow(isDev)
 
-    // ✅ Initial sync immediately after creation
     syncOverlayPosition()
 
     mainWindow.on("close", (e) => {
@@ -81,32 +85,31 @@ app.whenReady().then(() => {
         }
     })
 
-    // ── Window Synchronization ───────────────────────────────
-
-    // standard move/resize events
+    // ── Window Synchronization ──
     mainWindow.on("move", syncOverlayPosition)
     mainWindow.on("resize", syncOverlayPosition)
-    
-    // Start high-frequency sync loop during active movement
     mainWindow.on("will-move", startSyncLoop)
     mainWindow.on("moved", stopSyncLoop)
-    
-    // Fallback focus/blur loop to ensure it stays in sync
     mainWindow.on("focus", startSyncLoop)
     mainWindow.on("blur", stopSyncLoop)
-
-    // Initial sync after a short delay to ensure windows are rendered
     setTimeout(syncOverlayPosition, 200)
 
-    const workerPath = path.join(__dirname, "workers", "audio", "audio.worker.js")
+    const workerPath = path.join(
+        __dirname,
+        "workers",
+        "audio",
+        "audio.worker.js"
+    )
     const workerBridge = new WorkerBridge(
         () => new Worker(workerPath, { env: process.env })
     )
 
-    const audioService = new AudioService();
-    const micService = new MicService();
+    // ── Audio backend: NAPI-RS WASAPI loopback ───────
+    const audioEngine: IAudioBackend = new NativeAudioBackend()
 
-    // ── Worker → UI Bridge ─────────────────────────────
+    console.log("[MAIN] Audio backend: NAPI-RS (ghostly-audio)")
+
+    // ── Worker → UI Bridge ─────────────────────────
 
     workerBridge.onIntent(({ intent }) => {
         overlayWindow?.webContents.send("ai:intent", intent)
@@ -163,7 +166,7 @@ app.whenReady().then(() => {
     })
 
     // ── Coordinator ─────────────────────────────
-    coordinator = new PipelineCoordinator(audioService, micService, workerBridge)
+    coordinator = new PipelineCoordinator(audioEngine, workerBridge)
 
     if (coordinator && overlayWindow) {
         registerIpc({ coordinator, overlayWindow })
@@ -173,14 +176,17 @@ app.whenReady().then(() => {
         workerBridge.setActiveFile(filePath ?? "")
     })
 
-    // ✅ ONLY CALL INDEXER ONCE HERE
-    projectIndexer.indexProject(process.cwd())
+    projectIndexer
+        .indexProject(process.cwd())
         .then(() => {
             const symbols = projectIndexer.getAllSymbolNames()
             workerBridge.setProjectSymbols(symbols)
-            if (DEBUG) console.log(`[MAIN] Sent ${symbols.length} symbols to worker`)
+            if (DEBUG)
+                console.log(`[MAIN] Sent ${symbols.length} symbols to worker`)
         })
-        .catch(e => console.error("[MAIN] Re-index failed:", e?.message))
+        .catch((e) =>
+            console.error("[MAIN] Re-index failed:", e?.message)
+        )
 
     ipcMain.on("overlay:opacity:set", (_evt, opacity: number) => {
         if (!overlayWindow) return

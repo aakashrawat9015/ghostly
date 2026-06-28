@@ -11,9 +11,9 @@ const DEBUG_AUDIO = process.env.DEBUG_AUDIO === "true"
 const DEBUG_LLM   = process.env.DEBUG_LLM   === "true"
 
 const TARGET_CHUNK_SIZE   = 3200   // 100ms @ 16kHz
-const FLUSH_AFTER_MS      = 150
-const PARTIAL_THROTTLE_MS = 80
-const DEBOUNCE_MS         = 150
+const FLUSH_AFTER_MS      = 50     // drain to Deepgram after 50ms silence (was 150ms)
+const PARTIAL_THROTTLE_MS = 50     // partial UI update throttle (was 80ms)
+const DEBOUNCE_MS         = 50     // final transcript debounce (was 150ms)
 
 const SUMMARY_IDLE_MS  = 30_000
 const SUMMARY_MIN_FINALS = 5
@@ -282,7 +282,7 @@ function startDeepgram(mode: STTMode = "general") {
             if (DEBUG_LLM) console.log(`[Worker] ⚡ Early trigger on partial: "${cleaned.slice(0, 60)}..."`)
             tryLLMWithText(cleaned, "partial")
         }
-    })
+    }, mode)
 }
 
 async function stopDeepgram() {
@@ -361,8 +361,15 @@ parentPort?.on("message", async (msg) => {
         if (started) return
         started = true
         resetSessionState()
-        startAssistant()
-        startDeepgram(msg.mode)
+        try {
+            startAssistant()
+            startDeepgram(msg.mode)
+        } catch (err: any) {
+            console.error("[Worker] Start failed:", err)
+            parentPort?.postMessage({ type: "error", payload: err?.message ?? "Failed to start pipeline" })
+            started = false
+            return
+        }
         startTimers()
         console.log(`[Worker] ✅ Started (mode: ${msg.mode || "general"})`)
         return
@@ -416,7 +423,7 @@ parentPort?.on("message", async (msg) => {
         await stopDeepgram()
         stopTimers()
         resetSessionState()
-        assistant = correctionAgent = projectIndexer = null
+        assistant = correctionAgent = projectIndexer = groq = null
         activeFilePath = ""
         console.log("[Worker] ⏹️ Stopped")
     }

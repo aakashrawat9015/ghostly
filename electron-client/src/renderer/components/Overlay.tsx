@@ -114,6 +114,7 @@ export default function Overlay() {
     const [status, setStatus] = useState<OverlayStatus>("listening")
     const [visible, setVisible] = useState(true)
     const [answerKey, setAnswerKey] = useState(0)
+    const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
     const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const lastAnswerRef = useRef("")
@@ -208,9 +209,14 @@ export default function Overlay() {
 
         const offClear = window.api.onTranscriptClear(resetState)
 
+        const offError = window.api.onAIError?.((msg) => {
+            setErrorMsg(msg)
+            setTimeout(() => setErrorMsg(null), 8000)
+        })
+
         return () => {
             offIntent?.(); offAnswer?.(); offChunk?.(); offSummary?.()
-            offPartial?.(); offFinal?.(); offFinalCorrected?.(); offClear?.()
+            offPartial?.(); offFinal?.(); offFinalCorrected?.(); offClear?.(); offError?.()
             if (silenceTimer.current) clearTimeout(silenceTimer.current)
         }
     }, [resetState])
@@ -273,7 +279,14 @@ export default function Overlay() {
                         </div>
                     )}
 
-                    {!hasAnswer && !isThinking && !hasSummary && !hasTranscript && (
+                    {errorMsg && (
+                        <div className="px-5 py-3 flex items-start gap-2">
+                            <span className="mt-[2px] text-red-400 shrink-0">⚠</span>
+                            <p className="text-[11px] text-red-400/90 leading-relaxed">{errorMsg}</p>
+                        </div>
+                    )}
+
+                    {!hasAnswer && !isThinking && !hasSummary && !hasTranscript && !errorMsg && (
                         <div className="flex items-center justify-center py-6 opacity-20">
                             <div className="flex items-center gap-3">
                                 <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />

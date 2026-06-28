@@ -36,6 +36,7 @@ declare global {
 
             onAIAnswerChunk: (cb: (accumulated: string) => void) => () => void
             onAISummary: (cb: (text: string) => void) => () => void
+            onAIError: (cb: (message: string) => void) => () => void
 
             setActiveFile: (filePath: string) => void
             setOverlayInteractive: (interactive: boolean) => Promise<Reply>

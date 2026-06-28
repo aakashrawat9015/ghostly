@@ -45,6 +45,8 @@ type TranscriptClearCallback = () => void
 export class WorkerBridge {
     private worker: Worker | null = null
     private isTerminated = false
+    private workerStarted = false
+    private lastMode: STTMode | undefined
 
     private onResultCb?: ResultCallback
     private onResultChunkCb?: ResultChunkCallback
@@ -70,13 +72,16 @@ export class WorkerBridge {
         this.startFlusher()
     }
 
-    private initWorker() {
+    private initWorker(isRestart = false) {
         if (this.worker) {
             this.worker.removeAllListeners()
             this.worker.terminate()
         }
         this.worker = this.factory()
         this.attach()
+        if (isRestart && this.workerStarted) {
+            this.worker.postMessage({ type: "start", mode: this.lastMode })
+        }
     }
 
     private attach() {
@@ -98,7 +103,7 @@ export class WorkerBridge {
         this.worker.on("exit", (code) => {
             if (code !== 0 && !this.isTerminated) {
                 this.log(`Worker crashed (code ${code}), restarting...`)
-                setTimeout(() => this.initWorker(), RESTART_DELAY_MS)
+                setTimeout(() => this.initWorker(true), RESTART_DELAY_MS)
             }
         })
 
@@ -166,6 +171,8 @@ export class WorkerBridge {
     }
 
     start(mode?: STTMode) {
+        this.lastMode = mode
+        this.workerStarted = true
         this.worker?.postMessage({ type: "start", mode })
     }
 
@@ -174,7 +181,7 @@ export class WorkerBridge {
     }
 
     stop() {
-        // ✅ important: send any buffered audio before telling worker to stop
+        this.workerStarted = false
         this.flushAudioToWorker()
         this.worker?.postMessage({ type: "stop" })
     }

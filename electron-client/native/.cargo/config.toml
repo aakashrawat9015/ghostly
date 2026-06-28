@@ -1,0 +1,15 @@
+# Cargo configuration for ghostly-audio NAPI-RS build
+#
+# WASAPI requires the Windows MSVC toolchain, not MinGW.
+# Build from a Visual Studio Developer Command Prompt or with:
+#   rustup default stable-msvc
+
+[build]
+# Default to MSVC on Windows for WASAPI compatibility
+# (MinGW does not ship the Windows SDK headers)
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.i686-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

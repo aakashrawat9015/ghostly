@@ -31,6 +31,12 @@ src/renderer/.env.*
 
 # Native binaries / bundled executables
 resources/audio/
+native/target/
+native/build/
+native/*.node
+native/*.dll
+native/*.so
+native/*.dylib
 
 # OS files
 .DS_Store

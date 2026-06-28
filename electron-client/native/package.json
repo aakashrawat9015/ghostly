@@ -1,0 +1,21 @@
+{
+  "name": "@ghostly/audio-native",
+  "version": "0.1.0",
+  "main": "index.node",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "ghostly-audio",
+    "triples": {
+      "defaults": true
+    }
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "test": "node -e \"const m = require('./ghostly-audio.win32-x64-msvc.node'); console.log(m.listDevices())\""
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  }
+}

@@ -1,7 +1,6 @@
-import { AudioService } from "../services/AudioService"
 import { WorkerBridge } from "../workers/WorkerBridge"
 import { MeetingDetector } from "../services/MeetingDetector"
-import { MicService } from "../services/MicService"
+import { IAudioBackend } from "../services/audio/IAudioBackend"
 import { STTMode } from "../services/stt/DeepgramService"
 
 const DEBUG = process.env.DEBUG === "true"
@@ -11,10 +10,9 @@ export class PipelineCoordinator {
     private isRunning = false
     private currentMode: STTMode = "general"
 
-    // ── Accept services from outside — no new instances here ──
+    // ── IAudioBackend replaces concrete AudioEngine ──
     constructor(
-        private audio: AudioService,
-        private mic: MicService,
+        private audio: IAudioBackend,
         private bridge: WorkerBridge
     ) { }
 
@@ -40,14 +38,37 @@ export class PipelineCoordinator {
     }
 
     // ── Called by IPC when user manually starts/stops ──────────
-    startPipeline() {
+
+    async startPipeline() {
         if (this.isRunning) return
         this.isRunning = true
         this.bridge.start(this.currentMode)
-        // System audio
-        this.audio.startCapture((chunk) => this.bridge.sendAudioChunk(chunk))
-        // Mic audio
-        // this.mic.start((chunk) => this.bridge.sendAudioChunk(chunk))
+
+        // System audio capture — backend is IAudioBackend (NativeAudioBackend)
+        try {
+            this.audio.startSystemAudioCapture((chunk) =>
+                this.bridge.sendAudioChunk(chunk)
+            )
+            this.log("System audio capture active")
+        } catch (err: any) {
+            console.error(
+                "[PipelineCoordinator] Failed to start system audio:",
+                err.message
+            )
+            this.bridge.stop()
+            this.isRunning = false
+            return
+        }
+
+        // Mic capture — runs alongside system audio; both streams feed Deepgram
+        try {
+            this.audio.startMicCapture?.((chunk) =>
+                this.bridge.sendAudioChunk(chunk)
+            )
+            this.log("Microphone capture active")
+        } catch (err: any) {
+            console.error("[PipelineCoordinator] Failed to start mic audio:", err.message)
+        }
     }
 
     setMode(mode: STTMode) {
@@ -59,12 +80,14 @@ export class PipelineCoordinator {
     stopPipeline() {
         if (!this.isRunning) return
         this.isRunning = false
-        this.audio.stopCapture()
-        this.mic.stop()
+        this.audio.stopAll()
         this.bridge.stop()
+        this.log("Pipeline stopped")
     }
 
-    get running() { return this.isRunning }
+    get running() {
+        return this.isRunning
+    }
 
     private log(...args: any[]) {
         if (DEBUG) console.log("[PipelineCoordinator]", ...args)
